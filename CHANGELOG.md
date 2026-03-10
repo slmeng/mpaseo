@@ -1,17 +1,5 @@
 # Changelog
 
-## 0.1.24 - 2026-03-10
-### Fixed
-- Fixed the Windows desktop managed-daemon smoke test to rebuild packaged artifacts without relying on a bare `npm` executable lookup in GitHub Actions.
-
-## 0.1.23 - 2026-03-10
-### Fixed
-- Fixed the Windows desktop managed-daemon smoke test to resolve repo paths correctly on GitHub Actions runners.
-
-## 0.1.22 - 2026-03-10
-### Fixed
-- Fixed the Windows desktop release runtime builder to package managed-runtime workspaces without relying on a fragile `npm pack` shell invocation in GitHub Actions.
-
 ## 0.1.21 - 2026-03-10
 ### Improved
 - Improved desktop release reliability by fixing the Windows managed-runtime build path during GitHub Actions releases.
