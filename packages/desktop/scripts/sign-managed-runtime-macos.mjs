@@ -74,6 +74,17 @@ function needsHardenedRuntime(fileKind) {
   return fileKind.includes("executable");
 }
 
+function extractEntitlements(file) {
+  const result = spawnSync("codesign", ["-d", "--entitlements", "-", "--xml", file], {
+    stdio: "pipe",
+    encoding: "utf8",
+  });
+  if (result.status !== 0 || !result.stdout || result.stdout.trim().length === 0) {
+    return null;
+  }
+  return result.stdout;
+}
+
 async function main() {
   const pointer = JSON.parse(
     await fs.readFile(path.join(resourcesRoot, "current-runtime.json"), "utf8")
@@ -99,6 +110,15 @@ async function main() {
   signTargets.sort((left, right) => left.file.localeCompare(right.file));
 
   for (const target of signTargets) {
+    let entitlementsFile = null;
+    if (target.needsRuntime) {
+      const entitlements = extractEntitlements(target.file);
+      if (entitlements) {
+        entitlementsFile = `${target.file}.entitlements.plist`;
+        await fs.writeFile(entitlementsFile, entitlements, "utf8");
+      }
+    }
+
     const args = [
       "--force",
       "--sign",
@@ -107,10 +127,17 @@ async function main() {
     ];
     if (target.needsRuntime) {
       args.push("--options", "runtime");
+      if (entitlementsFile) {
+        args.push("--entitlements", entitlementsFile);
+      }
     }
     args.push(target.file);
     console.log(`[managed-runtime-sign] ${path.relative(repoRoot, target.file)}`);
     run("codesign", args);
+
+    if (entitlementsFile) {
+      await fs.unlink(entitlementsFile);
+    }
   }
 }
 
