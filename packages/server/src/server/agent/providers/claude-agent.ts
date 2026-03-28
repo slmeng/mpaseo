@@ -258,6 +258,7 @@ type ClaudeOptionsLogSummary = {
   hasCanUseTool: boolean;
   hasSpawnOverride: boolean;
   hasStderrHandler: boolean;
+  pathToClaudeCodeExecutable: string | null;
 };
 
 const MAX_RECENT_STDERR_CHARS = 4000;
@@ -301,6 +302,10 @@ function summarizeClaudeOptionsForLog(options: ClaudeOptions): ClaudeOptionsLogS
     hasCanUseTool: typeof options.canUseTool === "function",
     hasSpawnOverride: typeof options.spawnClaudeCodeProcess === "function",
     hasStderrHandler: typeof options.stderr === "function",
+    pathToClaudeCodeExecutable:
+      typeof options.pathToClaudeCodeExecutable === "string"
+        ? options.pathToClaudeCodeExecutable
+        : null,
   };
 }
 
@@ -1863,6 +1868,22 @@ class ClaudeAgentSession implements AgentSession {
       .join("\n\n");
 
     const claudeBinary = findExecutable("claude");
+    this.logger.debug(
+      {
+        claudeBinary,
+        pathEnvKey:
+          process.env["Path"] !== undefined
+            ? "Path"
+            : process.env["PATH"] !== undefined
+              ? "PATH"
+              : null,
+        pathIncludesClaudeLocalBin:
+          (process.env["Path"] ?? process.env["PATH"] ?? "")
+            .toLowerCase()
+            .includes("\\.local\\bin"),
+      },
+      "Resolved Claude executable",
+    );
     const base: ClaudeOptions = {
       cwd: this.config.cwd,
       includePartialMessages: true,

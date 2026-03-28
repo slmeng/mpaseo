@@ -64,6 +64,33 @@ interface FindExecutableDependencies {
   shell: string | undefined;
 }
 
+function resolveWindowsPathEntries(deps: FindExecutableDependencies): string[] {
+  try {
+    const output = deps.execFileSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        [
+          '$machine = [Environment]::GetEnvironmentVariable("Path", "Machine")',
+          '$user = [Environment]::GetEnvironmentVariable("Path", "User")',
+          "if ($machine) { Write-Output $machine }",
+          "if ($user) { Write-Output $user }",
+        ].join("; "),
+      ],
+      { encoding: "utf8" },
+    );
+    return output
+      .split(/\r?\n/)
+      .flatMap((line) => line.split(";"))
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 function resolveExecutableFromWhichOutput(
   name: string,
   output: string,
@@ -186,7 +213,21 @@ export function findExecutable(
 
   if (deps.platform() === "win32") {
     try {
-      const out = deps.execSync(`where.exe ${trimmed}`, { encoding: "utf8" }).trim();
+      const inheritedPath = process.env["Path"] ?? process.env["PATH"] ?? "";
+      const resolvedPath = [
+        ...inheritedPath.split(";"),
+        ...resolveWindowsPathEntries(deps),
+      ]
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .filter((entry, index, entries) => entries.indexOf(entry) === index)
+        .join(";");
+      const env = {
+        ...process.env,
+        PATH: resolvedPath,
+        Path: resolvedPath,
+      };
+      const out = deps.execFileSync("where.exe", [trimmed], { encoding: "utf8", env }).trim();
       const firstLine = out.split(/\r?\n/)[0]?.trim();
       return firstLine || null;
     } catch {

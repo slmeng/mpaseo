@@ -134,6 +134,40 @@ describe("applyProviderEnv", () => {
 });
 
 describe("findExecutable", () => {
+  test("on Windows, resolves executables using current machine and user PATH entries", () => {
+    findExecutableDependencies.platform = vi.fn(() => "win32");
+    process.env.Path = "C:\\Windows\\System32";
+    findExecutableDependencies.execFileSync.mockImplementation(
+      ((command: string, args?: string[]) => {
+        if (command === "powershell") {
+          return "C:\\Windows\\System32\r\nC:\\Users\\boudr\\.local\\bin\r\n";
+        }
+        if (command === "where.exe") {
+          return "C:\\Users\\boudr\\.local\\bin\\claude.exe\r\n";
+        }
+        throw new Error(`unexpected command ${command}`);
+      }) as any,
+    );
+
+    expect(findExecutable("claude", findExecutableDependencies)).toBe(
+      "C:\\Users\\boudr\\.local\\bin\\claude.exe",
+    );
+    const powershellCall = findExecutableDependencies.execFileSync.mock.calls[0];
+    expect(powershellCall?.[0]).toBe("powershell");
+    expect(powershellCall?.[1]).toContain("-NoProfile");
+    expect(powershellCall?.[1]).toContain("-NonInteractive");
+    expect(powershellCall?.[1]).toContain(
+      '$machine = [Environment]::GetEnvironmentVariable("Path", "Machine"); $user = [Environment]::GetEnvironmentVariable("Path", "User"); if ($machine) { Write-Output $machine }; if ($user) { Write-Output $user }',
+    );
+    const whereCall = findExecutableDependencies.execFileSync.mock.calls[1];
+    expect(whereCall?.[0]).toBe("where.exe");
+    expect(whereCall?.[1]).toEqual(["claude"]);
+    expect(whereCall?.[2]?.encoding).toBe("utf8");
+    const env = whereCall?.[2]?.env as Record<string, string | undefined>;
+    expect(env.PATH).toContain("C:\\Users\\boudr\\.local\\bin");
+    expect(env.Path).toContain("C:\\Users\\boudr\\.local\\bin");
+  });
+
   test("uses the last line from login-shell which output", () => {
     findExecutableDependencies.shell = "/bin/zsh";
     findExecutableDependencies.execSync.mockReturnValue(
