@@ -168,6 +168,24 @@ describe("findExecutable", () => {
     expect(env.Path).toContain("C:\\Users\\boudr\\.local\\bin");
   });
 
+  test("on Windows, preserves the first where.exe match", () => {
+    findExecutableDependencies.platform = vi.fn(() => "win32");
+    process.env.Path = "C:\\Windows\\System32";
+    findExecutableDependencies.execFileSync.mockImplementation(
+      ((command: string) => {
+        if (command === "powershell") {
+          return "C:\\Windows\\System32\r\nC:\\nvm4w\\nodejs\r\n";
+        }
+        if (command === "where.exe") {
+          return "C:\\nvm4w\\nodejs\\codex\r\nC:\\nvm4w\\nodejs\\codex.cmd\r\n";
+        }
+        throw new Error(`unexpected command ${command}`);
+      }) as any,
+    );
+
+    expect(findExecutable("codex", findExecutableDependencies)).toBe("C:\\nvm4w\\nodejs\\codex");
+  });
+
   test("uses the last line from login-shell which output", () => {
     findExecutableDependencies.shell = "/bin/zsh";
     findExecutableDependencies.execSync.mockReturnValue(

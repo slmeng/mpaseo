@@ -3421,6 +3421,7 @@ export class CodexAppServerAgentClient implements AgentClient {
     );
     return spawn(launchPrefix.command, [...launchPrefix.args, "app-server"], {
       detached: process.platform !== "win32",
+      shell: process.platform === "win32",
       stdio: ["pipe", "pipe", "pipe"],
       env: buildCodexAppServerEnv(this.runtimeSettings, launchEnv),
     });

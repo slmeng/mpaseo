@@ -219,6 +219,7 @@ function applyRuntimeSettingsToClaudeOptions(
           ...applyProviderEnv(spawnOptions.env, runtimeSettings),
           ...(launchEnv ?? {}),
         },
+        shell: process.platform === "win32",
         signal: spawnOptions.signal,
         stdio: ["pipe", "pipe", "pipe"],
       });

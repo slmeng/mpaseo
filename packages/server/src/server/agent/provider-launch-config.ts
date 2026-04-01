@@ -187,7 +187,10 @@ export function applyProviderEnv(
  * user opened a terminal and typed the command.  If that fails (e.g. the login
  * shell itself errors) we fall back to a plain `which`.
  *
- * On Windows the system PATH is always available, so `where.exe` is sufficient.
+ * On Windows we augment the daemon PATH with machine/user registry PATH values
+ * and return the first `where.exe` match. Launch-time execution decides whether
+ * the resolved path needs `cmd.exe` semantics (for example npm shims under
+ * nvm4w such as `C:\nvm4w\nodejs\codex`).
  */
 export function findExecutable(
   name: string,
@@ -228,8 +231,12 @@ export function findExecutable(
         Path: resolvedPath,
       };
       const out = deps.execFileSync("where.exe", [trimmed], { encoding: "utf8", env }).trim();
-      const firstLine = out.split(/\r?\n/)[0]?.trim();
-      return firstLine || null;
+      return (
+        out
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find((line) => line.length > 0) ?? null
+      );
     } catch {
       return null;
     }

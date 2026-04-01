@@ -175,6 +175,7 @@ function checkProviderBinary(binary: string): { path: string | null; version: st
       timeout: 5000,
       stdio: ["ignore", "pipe", "pipe"],
       env,
+      shell: process.platform === "win32",
     }).trim();
     return { path: binaryPath, version: output || null };
   } catch {

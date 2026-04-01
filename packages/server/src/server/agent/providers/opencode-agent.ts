@@ -336,6 +336,7 @@ export class OpenCodeServerManager {
         launchPrefix.command,
         [...launchPrefix.args, "serve", "--port", String(this.port)],
         {
+          shell: process.platform === "win32",
           stdio: ["ignore", "pipe", "pipe"],
           env: applyProviderEnv(process.env, this.runtimeSettings),
         },
