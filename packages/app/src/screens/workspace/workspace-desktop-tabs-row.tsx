@@ -16,7 +16,6 @@ import {
   Copy,
   Plus,
   Rows2,
-  SquarePen,
   SquareTerminal,
   X,
 } from "lucide-react-native";
@@ -70,7 +69,8 @@ type WorkspaceDesktopTabsRowProps = {
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
-  onCreateLauncherTab: (input: { paneId?: string }) => void;
+  onCreateDraftTab: (input: { paneId?: string }) => void;
+  onCreateTerminalTab: (input: { paneId?: string }) => void;
   onReorderTabs: (nextTabs: WorkspaceTabDescriptor[]) => void;
   onSplitRight: () => void;
   onSplitDown: () => void;
@@ -81,9 +81,6 @@ type WorkspaceDesktopTabsRowProps = {
 };
 
 function getFallbackTabLabel(tab: WorkspaceTabDescriptor): string {
-  if (tab.target.kind === "launcher") {
-    return "New Tab";
-  }
   if (tab.target.kind === "draft") {
     return "New Agent";
   }
@@ -338,7 +335,8 @@ export function WorkspaceDesktopTabsRow({
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
-  onCreateLauncherTab,
+  onCreateDraftTab,
+  onCreateTerminalTab,
   onReorderTabs,
   onSplitRight,
   onSplitDown,
@@ -349,6 +347,7 @@ export function WorkspaceDesktopTabsRow({
 }: WorkspaceDesktopTabsRowProps) {
   const { theme } = useUnistyles();
   const newTabKeys = useShortcutKeys("workspace-tab-new");
+  const newTerminalKeys = useShortcutKeys("workspace-terminal-new");
   const splitRightKeys = useShortcutKeys("workspace-pane-split-right");
   const splitDownKeys = useShortcutKeys("workspace-pane-split-down");
   const [tabsContainerWidth, setTabsContainerWidth] = useState<number>(0);
@@ -471,26 +470,54 @@ export function WorkspaceDesktopTabsRow({
             );
           }}
         />
-      </ScrollView>
-      <View style={styles.tabsActions} onLayout={handleTabsActionsLayout}>
         <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
-          <TooltipTrigger
-            testID="workspace-new-tab"
-            onPress={() => onCreateLauncherTab({ paneId })}
-            accessibilityRole="button"
-            accessibilityLabel="New tab"
-            style={({ hovered, pressed }) => [
-              styles.newTabActionButton,
-              (hovered || pressed) && styles.newTabActionButtonHovered,
-            ]}
-          >
-            <Plus size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+          <TooltipTrigger asChild>
+            <Pressable
+              testID="workspace-new-tab"
+              onPress={() => onCreateDraftTab({ paneId })}
+              accessibilityRole="button"
+              accessibilityLabel="New tab"
+              style={styles.inlineNewTabButton}
+            >
+              {({ hovered, pressed }) => (
+                <Plus
+                  size={theme.iconSize.md}
+                  color={
+                    hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted
+                  }
+                />
+              )}
+            </Pressable>
           </TooltipTrigger>
           <TooltipContent side="bottom" align="center" offset={8}>
             <View style={styles.newTabTooltipRow}>
               <Text style={styles.newTabTooltipText}>New tab</Text>
               {newTabKeys ? (
                 <Shortcut chord={newTabKeys} style={styles.newTabTooltipShortcut} />
+              ) : null}
+            </View>
+          </TooltipContent>
+        </Tooltip>
+      </ScrollView>
+      <View style={styles.tabsActions} onLayout={handleTabsActionsLayout}>
+        <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+          <TooltipTrigger
+            testID="workspace-new-terminal"
+            onPress={() => onCreateTerminalTab({ paneId })}
+            accessibilityRole="button"
+            accessibilityLabel="New terminal"
+            style={({ hovered, pressed }) => [
+              styles.newTabActionButton,
+              (hovered || pressed) && styles.newTabActionButtonHovered,
+            ]}
+          >
+            <SquareTerminal size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="center" offset={8}>
+            <View style={styles.newTabTooltipRow}>
+              <Text style={styles.newTabTooltipText}>New terminal</Text>
+              {newTerminalKeys ? (
+                <Shortcut chord={newTerminalKeys} style={styles.newTabTooltipShortcut} />
               ) : null}
             </View>
           </TooltipContent>
@@ -784,6 +811,13 @@ const styles = StyleSheet.create((theme) => ({
   },
   tabCloseButtonActive: {
     backgroundColor: theme.colors.surface3,
+  },
+  inlineNewTabButton: {
+    paddingHorizontal: theme.spacing[3],
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 0,
   },
   newTabActionButton: {
     width: 22,
