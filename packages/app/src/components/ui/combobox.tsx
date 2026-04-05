@@ -73,6 +73,12 @@ export interface ComboboxProps {
    * for that combobox instance to avoid animation overriding hidden opacity.
    */
   desktopPreventInitialFlash?: boolean;
+  /** Minimum width for the desktop popover (overrides trigger-based width). */
+  desktopMinWidth?: number;
+  /** Fixed height for the desktop popover (overrides default 400px max). */
+  desktopFixedHeight?: number;
+  /** Content rendered above the scroll area on desktop (sticky header). */
+  stickyHeader?: ReactNode;
   anchorRef: React.RefObject<View | null>;
   children?: ReactNode;
 }
@@ -150,6 +156,8 @@ export interface ComboboxItemProps {
   selected?: boolean;
   active?: boolean;
   disabled?: boolean;
+  /** When true, bumps hover/pressed colors up one surface level (for items on elevated backgrounds). */
+  elevated?: boolean;
   onPress: () => void;
   testID?: string;
 }
@@ -163,6 +171,7 @@ export function ComboboxItem({
   selected,
   active,
   disabled,
+  elevated,
   onPress,
   testID,
 }: ComboboxItemProps): ReactElement {
@@ -187,8 +196,8 @@ export function ComboboxItem({
       onPress={onPress}
       style={({ pressed, hovered = false }) => [
         styles.comboboxItem,
-        hovered && styles.comboboxItemHovered,
-        pressed && styles.comboboxItemPressed,
+        hovered && (elevated ? styles.comboboxItemHoveredElevated : styles.comboboxItemHovered),
+        pressed && (elevated ? styles.comboboxItemPressedElevated : styles.comboboxItemPressed),
         active && styles.comboboxItemActive,
         disabled && styles.comboboxItemDisabled,
       ]}
@@ -246,6 +255,9 @@ export function Combobox({
   stackBehavior,
   desktopPlacement = "top-start",
   desktopPreventInitialFlash = true,
+  desktopMinWidth,
+  desktopFixedHeight,
+  stickyHeader,
   anchorRef,
   children,
 }: ComboboxProps): ReactElement {
@@ -390,12 +402,27 @@ export function Combobox({
     ((floatingTop ?? 0) !== 0 || floatingLeft !== 0 || referenceAtOrigin);
   const shouldHideDesktopContent = desktopPreventInitialFlash && !hasResolvedDesktopPosition;
   const shouldUseDesktopFade = !desktopPreventInitialFlash;
+  // For top-placed popups: once position resolves, use bottom-based CSS positioning
+  // so height changes grow upward naturally without floating-ui needing to reposition.
+  const useStableBottom =
+    !isDesktopAboveSearch &&
+    IS_WEB &&
+    !isMobile &&
+    hasResolvedDesktopPosition &&
+    desktopPlacement.startsWith("top") &&
+    referenceTop !== null;
+
   const desktopPositionStyle = isDesktopAboveSearch
     ? {
         left: floatingLeft ?? 0,
         bottom: desktopAboveSearchBottom ?? 0,
       }
-    : floatingStyles;
+    : useStableBottom
+      ? {
+          left: floatingLeft ?? 0,
+          bottom: Math.max(windowHeight - referenceTop!, collisionPadding),
+        }
+      : floatingStyles;
 
   useEffect(() => {
     if (!isMobile) return;
@@ -662,6 +689,7 @@ export function Combobox({
         <View style={styles.bottomSheetHeader}>
           <Text style={styles.comboboxTitle}>{title}</Text>
         </View>
+        {stickyHeader}
         <BottomSheetScrollView
           contentContainerStyle={styles.comboboxScrollContent}
           keyboardShouldPersistTaps="handled"
@@ -687,13 +715,16 @@ export function Combobox({
             styles.desktopContainer,
             {
               position: "absolute",
-              minWidth: referenceWidth ?? 200,
-              maxWidth: 400,
+              minWidth: desktopMinWidth ?? referenceWidth ?? 200,
+              maxWidth: Math.max(400, desktopMinWidth ?? 0),
             },
+            desktopFixedHeight != null
+              ? { minHeight: desktopFixedHeight, maxHeight: desktopFixedHeight }
+              : null,
             desktopPositionStyle,
             shouldHideDesktopContent ? { opacity: 0 } : null,
             typeof availableSize?.height === "number"
-              ? { maxHeight: Math.min(availableSize.height, 400) }
+              ? { maxHeight: Math.min(availableSize.height, desktopFixedHeight ?? 400) }
               : null,
           ]}
           ref={refs.setFloating}
@@ -701,14 +732,17 @@ export function Combobox({
           onLayout={() => update()}
         >
           {children ? (
-            <ScrollView
-              contentContainerStyle={styles.desktopScrollContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              style={styles.desktopScroll}
-            >
-              {content}
-            </ScrollView>
+            <>
+              {stickyHeader}
+              <ScrollView
+                contentContainerStyle={styles.desktopChildrenScrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                style={styles.desktopScroll}
+              >
+                {content}
+              </ScrollView>
+            </>
           ) : (
             <>
               {effectiveOptionsPosition === "above-search" ? (
@@ -783,8 +817,14 @@ const styles = StyleSheet.create((theme) => ({
   comboboxItemHovered: {
     backgroundColor: theme.colors.surface1,
   },
+  comboboxItemHoveredElevated: {
+    backgroundColor: theme.colors.surface2,
+  },
   comboboxItemPressed: {
     backgroundColor: theme.colors.surface1,
+  },
+  comboboxItemPressedElevated: {
+    backgroundColor: theme.colors.surface2,
   },
   comboboxItemActive: {
     backgroundColor: theme.colors.surface1,
@@ -875,6 +915,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   desktopScrollContent: {
     paddingVertical: theme.spacing[1],
+  },
+  desktopChildrenScrollContent: {
+    // No padding — custom children (e.g. model selector) control their own spacing
   },
   desktopScrollContentAboveSearch: {
     flexGrow: 1,

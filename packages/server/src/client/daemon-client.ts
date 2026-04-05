@@ -42,6 +42,9 @@ import type {
   ListProviderModelsResponseMessage,
   ListProviderModesResponseMessage,
   ListAvailableProvidersResponse,
+  GetProvidersSnapshotResponseMessage,
+  RefreshProvidersSnapshotResponseMessage,
+  ProviderDiagnosticResponseMessage,
   ListTerminalsResponse,
   CreateTerminalResponse,
   SubscribeTerminalResponse,
@@ -152,6 +155,10 @@ export type DaemonEvent =
       requestId: string;
       resolution: AgentPermissionResponse;
     }
+  | {
+      type: "providers_snapshot_update";
+      payload: Extract<SessionOutboundMessage, { type: "providers_snapshot_update" }>["payload"];
+    }
   | { type: "error"; message: string };
 
 export type DaemonEventHandler = (event: DaemonEvent) => void;
@@ -228,6 +235,9 @@ type ListProviderFeaturesPayload = ListProviderFeaturesResponseMessage["payload"
 type ListProviderModelsPayload = ListProviderModelsResponseMessage["payload"];
 type ListProviderModesPayload = ListProviderModesResponseMessage["payload"];
 type ListAvailableProvidersPayload = ListAvailableProvidersResponse["payload"];
+type GetProvidersSnapshotPayload = GetProvidersSnapshotResponseMessage["payload"];
+type RefreshProvidersSnapshotPayload = RefreshProvidersSnapshotResponseMessage["payload"];
+type ProviderDiagnosticPayload = ProviderDiagnosticResponseMessage["payload"];
 type ListCommandsPayload = ListCommandsResponse["payload"];
 type ListCommandsDraftConfig = Pick<
   AgentSessionConfig,
@@ -2574,6 +2584,51 @@ export class DaemonClient {
     });
   }
 
+  async getProvidersSnapshot(options?: {
+    cwd?: string;
+    requestId?: string;
+  }): Promise<GetProvidersSnapshotPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options?.requestId,
+      message: {
+        type: "get_providers_snapshot_request",
+        cwd: options?.cwd,
+      },
+      responseType: "get_providers_snapshot_response",
+      timeout: 10000,
+    });
+  }
+
+  async refreshProvidersSnapshot(options?: {
+    cwd?: string;
+    requestId?: string;
+  }): Promise<RefreshProvidersSnapshotPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options?.requestId,
+      message: {
+        type: "refresh_providers_snapshot_request",
+        cwd: options?.cwd,
+      },
+      responseType: "refresh_providers_snapshot_response",
+      timeout: 5000,
+    });
+  }
+
+  async getProviderDiagnostic(
+    provider: AgentProvider,
+    options?: { requestId?: string },
+  ): Promise<ProviderDiagnosticPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options?.requestId,
+      message: {
+        type: "provider_diagnostic_request",
+        provider,
+      },
+      responseType: "provider_diagnostic_response",
+      timeout: 30000,
+    });
+  }
+
   async listCommands(agentId: string, requestId?: string): Promise<ListCommandsPayload>;
   async listCommands(agentId: string, options?: ListCommandsOptions): Promise<ListCommandsPayload>;
   async listCommands(
@@ -3667,6 +3722,11 @@ export class DaemonClient {
           agentId: msg.payload.agentId,
           requestId: msg.payload.requestId,
           resolution: msg.payload.resolution,
+        };
+      case "providers_snapshot_update":
+        return {
+          type: "providers_snapshot_update",
+          payload: msg.payload,
         };
       default:
         return null;

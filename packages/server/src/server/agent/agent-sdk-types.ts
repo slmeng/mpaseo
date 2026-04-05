@@ -45,6 +45,8 @@ export type AgentMode = {
   description?: string;
 };
 
+export type ProviderStatus = "ready" | "loading" | "error" | "unavailable";
+
 export type AgentModelDefinition = {
   provider: AgentProvider;
   id: string;
@@ -63,6 +65,15 @@ export type AgentSelectOption = {
   isDefault?: boolean;
   metadata?: AgentMetadata;
 };
+
+export interface ProviderSnapshotEntry {
+  provider: AgentProvider;
+  status: ProviderStatus;
+  error?: string;
+  models?: AgentModelDefinition[];
+  modes?: AgentMode[];
+  fetchedAt?: string;
+}
 
 export type AgentFeatureToggle = {
   type: "toggle";
@@ -469,4 +480,5 @@ export interface AgentClient {
    * Returns true if available, false otherwise.
    */
   isAvailable(): Promise<boolean>;
+  getDiagnostic?(): Promise<{ diagnostic: string }>;
 }

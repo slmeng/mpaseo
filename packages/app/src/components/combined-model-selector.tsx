@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
+  TextInput,
   Pressable,
   Platform,
   ActivityIndicator,
   type GestureResponderEvent,
 } from "react-native";
+import { BottomSheetTextInput } from "@gorhom/bottom-sheet";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   ArrowLeft,
@@ -15,9 +17,14 @@ import {
   Search,
   Star,
 } from "lucide-react-native";
-import type { AgentModelDefinition, AgentProvider } from "@server/server/agent/agent-sdk-types";
+import type {
+  AgentModelDefinition,
+  AgentProvider,
+} from "@server/server/agent/agent-sdk-types";
 import type { AgentProviderDefinition } from "@server/server/agent/provider-manifest";
-import { Combobox, ComboboxItem, SearchInput } from "@/components/ui/combobox";
+const IS_WEB = Platform.OS === "web";
+
+import { Combobox, ComboboxItem } from "@/components/ui/combobox";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { getProviderIcon } from "@/components/provider-icons";
 import type { FavoriteModelRow } from "@/hooks/use-form-preferences";
@@ -28,8 +35,6 @@ import {
   resolveProviderLabel,
   type SelectorModelRow,
 } from "./combined-model-selector.utils";
-
-const INLINE_MODEL_THRESHOLD = Number.POSITIVE_INFINITY;
 
 type SelectorView =
   | { kind: "all" }
@@ -51,6 +56,7 @@ interface CombinedModelSelectorProps {
     disabled: boolean;
     isOpen: boolean;
   }) => React.ReactNode;
+  onClose?: () => void;
   disabled?: boolean;
 }
 
@@ -67,8 +73,6 @@ interface SelectorContentProps {
   canSelectProvider: (provider: string) => boolean;
   onToggleFavorite?: (provider: string, modelId: string) => void;
   onDrillDown: (providerId: string, providerLabel: string) => void;
-  onBack?: () => void;
-  isLoading?: boolean;
 }
 
 function resolveDefaultModelLabel(models: AgentModelDefinition[] | undefined): string {
@@ -100,6 +104,22 @@ function partitionRows(
   return { favoriteRows, regularRows };
 }
 
+function sortFavoritesFirst(
+  rows: SelectorModelRow[],
+  favoriteKeys: Set<string>,
+): SelectorModelRow[] {
+  const favorites: SelectorModelRow[] = [];
+  const rest: SelectorModelRow[] = [];
+  for (const row of rows) {
+    if (favoriteKeys.has(row.favoriteKey)) {
+      favorites.push(row);
+    } else {
+      rest.push(row);
+    }
+  }
+  return [...favorites, ...rest];
+}
+
 function groupRowsByProvider(
   rows: SelectorModelRow[],
 ): Array<{ providerId: string; providerLabel: string; rows: SelectorModelRow[] }> {
@@ -127,6 +147,7 @@ function ModelRow({
   isSelected,
   isFavorite,
   disabled = false,
+  elevated = false,
   onPress,
   onToggleFavorite,
 }: {
@@ -134,6 +155,7 @@ function ModelRow({
   isSelected: boolean;
   isFavorite: boolean;
   disabled?: boolean;
+  elevated?: boolean;
   onPress: () => void;
   onToggleFavorite?: (provider: string, modelId: string) => void;
 }) {
@@ -154,8 +176,9 @@ function ModelRow({
       label={row.modelLabel}
       selected={isSelected}
       disabled={disabled}
+      elevated={elevated}
       onPress={onPress}
-      leadingSlot={<ProviderIcon size={14} color={theme.colors.foregroundMuted} />}
+      leadingSlot={<ProviderIcon size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />}
       trailingSlot={
         onToggleFavorite && !disabled ? (
           <Pressable
@@ -229,7 +252,7 @@ function FavoritesSection({
   }
 
   return (
-    <View>
+    <View style={styles.favoritesContainer}>
       <View style={styles.sectionHeading}>
         <Text style={styles.sectionHeadingText}>Favorites</Text>
       </View>
@@ -240,11 +263,11 @@ function FavoritesSection({
           isSelected={row.provider === selectedProvider && row.modelId === selectedModel}
           isFavorite={favoriteKeys.has(row.favoriteKey)}
           disabled={!canSelectProvider(row.provider)}
+          elevated
           onPress={() => onSelect(row.provider, row.modelId)}
           onToggleFavorite={onToggleFavorite}
         />
       ))}
-      <View style={styles.separator} />
     </View>
   );
 }
@@ -259,6 +282,7 @@ function GroupedProviderRows({
   canSelectProvider,
   onToggleFavorite,
   onDrillDown,
+  viewKind,
 }: {
   providerDefinitions: AgentProviderDefinition[];
   groupedRows: Array<{ providerId: string; providerLabel: string; rows: SelectorModelRow[] }>;
@@ -269,6 +293,7 @@ function GroupedProviderRows({
   canSelectProvider: (provider: string) => boolean;
   onToggleFavorite?: (provider: string, modelId: string) => void;
   onDrillDown: (providerId: string, providerLabel: string) => void;
+  viewKind: SelectorView["kind"];
 }) {
   const { theme } = useUnistyles();
 
@@ -277,19 +302,14 @@ function GroupedProviderRows({
       {groupedRows.map((group, index) => {
         const providerDefinition = providerDefinitions.find((definition) => definition.id === group.providerId);
         const ProvIcon = getProviderIcon(group.providerId);
-        const isInline = group.rows.length <= INLINE_MODEL_THRESHOLD;
+        const isInline = viewKind === "provider";
 
         return (
           <View key={group.providerId}>
             {index > 0 ? <View style={styles.separator} /> : null}
             {isInline ? (
               <>
-                <View style={styles.sectionHeading}>
-                  <Text style={styles.sectionHeadingText}>
-                    {providerDefinition?.label ?? group.providerLabel}
-                  </Text>
-                </View>
-                {group.rows.map((row) => (
+                {sortFavoritesFirst(group.rows, favoriteKeys).map((row) => (
                   <ModelRow
                     key={row.favoriteKey}
                     row={row}
@@ -310,17 +330,59 @@ function GroupedProviderRows({
                   pressed && styles.drillDownRowPressed,
                 ]}
               >
-                <ProvIcon size={14} color={theme.colors.foregroundMuted} />
+                <ProvIcon size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
                 <Text style={styles.drillDownText}>{group.providerLabel}</Text>
                 <View style={styles.drillDownTrailing}>
-                  <Text style={styles.drillDownCount}>{group.rows.length}</Text>
-                  <ChevronRight size={14} color={theme.colors.foregroundMuted} />
+                  <Text style={styles.drillDownCount}>
+                    {group.rows.length} {group.rows.length === 1 ? "model" : "models"}
+                  </Text>
+                  <ChevronRight size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
                 </View>
               </Pressable>
             )}
           </View>
         );
       })}
+    </View>
+  );
+}
+
+function ProviderSearchInput({
+  value,
+  onChangeText,
+  autoFocus = false,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  autoFocus?: boolean;
+}) {
+  const { theme } = useUnistyles();
+  const inputRef = useRef<TextInput>(null);
+  const InputComponent = Platform.OS === "web" ? TextInput : BottomSheetTextInput;
+
+  useEffect(() => {
+    if (autoFocus && Platform.OS === "web" && inputRef.current) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [autoFocus]);
+
+  return (
+    <View style={styles.providerSearchContainer}>
+      <Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+      <InputComponent
+        ref={inputRef as any}
+        // @ts-expect-error - outlineStyle is web-only
+        style={[styles.providerSearchInput, Platform.OS === "web" && { outlineStyle: "none" }]}
+        placeholder="Search models..."
+        placeholderTextColor={theme.colors.foregroundMuted}
+        value={value}
+        onChangeText={onChangeText}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
     </View>
   );
 }
@@ -338,9 +400,8 @@ function SelectorContent({
   canSelectProvider,
   onToggleFavorite,
   onDrillDown,
-  onBack,
-  isLoading,
 }: SelectorContentProps) {
+  const { theme } = useUnistyles();
   const allRows = useMemo(
     () => buildModelRows(providerDefinitions, allProviderModels),
     [allProviderModels, providerDefinitions],
@@ -365,35 +426,41 @@ function SelectorContent({
     [favoriteKeys, visibleRows],
   );
 
-  const groupedRegularRows = useMemo(() => groupRowsByProvider(regularRows), [regularRows]);
+  // Group ALL visible rows by provider — favorites are a cross-cutting view,
+  // not a partition. A model being favorited doesn't remove it from its provider.
+  const allGroupedRows = useMemo(() => groupRowsByProvider(visibleRows), [visibleRows]);
+
+  // When searching at Level 1, filter grouped rows to only providers whose name or models match
+  const filteredGroupedRows = useMemo(() => {
+    if (view.kind === "provider" || !normalizedQuery) {
+      return allGroupedRows;
+    }
+    return allGroupedRows.filter(
+      (group) =>
+        group.providerLabel.toLowerCase().includes(normalizedQuery) || group.rows.length > 0,
+    );
+  }, [allGroupedRows, normalizedQuery, view.kind]);
+
+  const hasResults = favoriteRows.length > 0 || filteredGroupedRows.length > 0;
 
   return (
     <View>
-      {view.kind === "provider" ? (
-        <ProviderBackButton providerId={view.providerId} providerLabel={view.providerLabel} onBack={onBack} />
+      {view.kind === "all" ? (
+        <FavoritesSection
+          favoriteRows={favoriteRows}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          favoriteKeys={favoriteKeys}
+          onSelect={onSelect}
+          canSelectProvider={canSelectProvider}
+          onToggleFavorite={onToggleFavorite}
+        />
       ) : null}
 
-      <SearchInput
-        placeholder={view.kind === "provider" ? "Search models..." : "Search models or providers..."}
-        value={searchQuery}
-        onChangeText={onSearchChange}
-        autoFocus={Platform.OS === "web"}
-      />
-
-      <FavoritesSection
-        favoriteRows={favoriteRows}
-        selectedProvider={selectedProvider}
-        selectedModel={selectedModel}
-        favoriteKeys={favoriteKeys}
-        onSelect={onSelect}
-        canSelectProvider={canSelectProvider}
-        onToggleFavorite={onToggleFavorite}
-      />
-
-      {groupedRegularRows.length > 0 ? (
+      {filteredGroupedRows.length > 0 ? (
         <GroupedProviderRows
           providerDefinitions={providerDefinitions}
-          groupedRows={groupedRegularRows}
+          groupedRows={filteredGroupedRows}
           selectedProvider={selectedProvider}
           selectedModel={selectedModel}
           favoriteKeys={favoriteKeys}
@@ -401,22 +468,14 @@ function SelectorContent({
           canSelectProvider={canSelectProvider}
           onToggleFavorite={onToggleFavorite}
           onDrillDown={onDrillDown}
+          viewKind={view.kind}
         />
       ) : null}
 
-      {favoriteRows.length === 0 && groupedRegularRows.length === 0 ? (
+      {!hasResults ? (
         <View style={styles.emptyState}>
-          {isLoading ? (
-            <>
-              <ActivityIndicator size="small" color="#777" />
-              <Text style={styles.emptyStateText}>Loading models…</Text>
-            </>
-          ) : (
-            <>
-              <Search size={16} color="#777" />
-              <Text style={styles.emptyStateText}>No models match your search</Text>
-            </>
-          )}
+          <Search size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+          <Text style={styles.emptyStateText}>No models match your search</Text>
         </View>
       ) : null}
     </View>
@@ -448,8 +507,8 @@ function ProviderBackButton({
         pressed && styles.backButtonPressed,
       ]}
     >
-      <ArrowLeft size={14} color={theme.colors.foregroundMuted} />
-      <ProviderIcon size={14} color={theme.colors.foregroundMuted} />
+      <ArrowLeft size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+      <ProviderIcon size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
       <Text style={styles.backButtonText}>{providerLabel}</Text>
     </Pressable>
   );
@@ -466,6 +525,7 @@ export function CombinedModelSelector({
   favoriteKeys = new Set<string>(),
   onToggleFavorite,
   renderTrigger,
+  onClose,
   disabled = false,
 }: CombinedModelSelectorProps) {
   const { theme } = useUnistyles();
@@ -476,25 +536,35 @@ export function CombinedModelSelector({
   const [view, setView] = useState<SelectorView>({ kind: "all" });
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Single-provider mode: only one provider with models → skip Level 1 entirely
+  const singleProviderView = useMemo<SelectorView | null>(() => {
+    const providers = Array.from(allProviderModels.keys());
+    if (providers.length !== 1) return null;
+    const providerId = providers[0]!;
+    const label = resolveProviderLabel(providerDefinitions, providerId);
+    return { kind: "provider", providerId, providerLabel: label };
+  }, [allProviderModels, providerDefinitions]);
+
   const handleOpenChange = useCallback(
     (open: boolean) => {
       setIsOpen(open);
-      setView({ kind: "all" });
+      setView(singleProviderView ?? { kind: "all" });
       if (!open) {
         setSearchQuery("");
+        onClose?.();
       }
     },
-    [],
+    [onClose, singleProviderView],
   );
 
   const handleSelect = useCallback(
     (provider: string, modelId: string) => {
       onSelect(provider as AgentProvider, modelId);
       setIsOpen(false);
-      setView({ kind: "all" });
+      setView(singleProviderView ?? { kind: "all" });
       setSearchQuery("");
     },
-    [onSelect],
+    [onSelect, singleProviderView],
   );
 
   const ProviderIcon = getProviderIcon(selectedProvider);
@@ -511,6 +581,15 @@ export function CombinedModelSelector({
     const model = models.find((entry) => entry.id === selectedModel);
     return model?.label ?? resolveDefaultModelLabel(models);
   }, [allProviderModels, isLoading, selectedModel, selectedProvider]);
+
+  const desktopFixedHeight = useMemo(() => {
+    if (view.kind !== "provider") {
+      return undefined;
+    }
+    const models = allProviderModels.get(view.providerId);
+    const modelCount = models?.length ?? 0;
+    return Math.min(80 + modelCount * 40, 400);
+  }, [allProviderModels, view]);
 
   const triggerLabel = useMemo(() => {
     if (selectedModelLabel === "Loading..." || selectedModelLabel === "Select model") {
@@ -579,7 +658,30 @@ export function CombinedModelSelector({
         stackBehavior="push"
         anchorRef={anchorRef}
         desktopPlacement="top-start"
+        desktopMinWidth={360}
+        desktopFixedHeight={desktopFixedHeight}
         title="Select model"
+        stickyHeader={
+          view.kind === "provider" ? (
+            <View style={styles.level2Header}>
+              {!singleProviderView ? (
+                <ProviderBackButton
+                  providerId={view.providerId}
+                  providerLabel={view.providerLabel}
+                  onBack={() => {
+                    setView({ kind: "all" });
+                    setSearchQuery("");
+                  }}
+                />
+              ) : null}
+              <ProviderSearchInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus={Platform.OS === "web"}
+              />
+            </View>
+          ) : undefined
+        }
       >
         {isContentReady ? (
           <SelectorContent
@@ -594,17 +696,9 @@ export function CombinedModelSelector({
             onSelect={handleSelect}
             canSelectProvider={canSelectProvider}
             onToggleFavorite={onToggleFavorite}
-            isLoading={isLoading}
             onDrillDown={(providerId, providerLabel) => {
               setView({ kind: "provider", providerId, providerLabel });
             }}
-            onBack={
-              view.kind === "provider"
-                ? () => {
-                    setView({ kind: "all" });
-                  }
-                : undefined
-            }
           />
         ) : (
           <View style={styles.sheetLoadingState}>
@@ -646,17 +740,23 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: 0,
     height: "auto",
   },
+  favoritesContainer: {
+    backgroundColor: theme.colors.surface1,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
   separator: {
     height: 1,
     backgroundColor: theme.colors.border,
-    marginVertical: theme.spacing[1],
   },
   sectionHeading: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1],
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[1],
+    ...(IS_WEB ? {} : { marginHorizontal: theme.spacing[1] }),
   },
   sectionHeadingText: {
     fontSize: theme.fontSize.xs,
@@ -670,6 +770,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[2],
     minHeight: 36,
+    ...(IS_WEB ? {} : { marginHorizontal: theme.spacing[1] }),
   },
   drillDownRowHovered: {
     backgroundColor: theme.colors.surface1,
@@ -679,8 +780,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   drillDownText: {
     flex: 1,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
   },
   drillDownTrailing: {
     flexDirection: "row",
@@ -691,6 +792,11 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  level2Header: {
+    backgroundColor: theme.colors.surface1,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
   backButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -699,9 +805,10 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[2],
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
+    ...(IS_WEB ? {} : { marginHorizontal: theme.spacing[1] }),
   },
   backButtonHovered: {
-    backgroundColor: theme.colors.surface1,
+    backgroundColor: theme.colors.surface2,
   },
   backButtonPressed: {
     backgroundColor: theme.colors.surface2,
@@ -744,6 +851,19 @@ const styles = StyleSheet.create((theme) => ({
   },
   sheetLoadingText: {
     color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
+  providerSearchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: theme.spacing[3],
+    gap: theme.spacing[2],
+    ...(IS_WEB ? {} : { marginHorizontal: theme.spacing[1] }),
+  },
+  providerSearchInput: {
+    flex: 1,
+    paddingVertical: theme.spacing[3],
+    color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
   },
 }));

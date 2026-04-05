@@ -119,6 +119,7 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
   });
 
   function handleSubmit() {
+    if (!allAnswered || isResponding) return;
     setRespondingAction("submit");
     const answers: Record<string, string> = {};
     for (let i = 0; i < questions!.length; i++) {
@@ -228,7 +229,9 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
               placeholderTextColor={theme.colors.foregroundMuted}
               value={otherText}
               onChangeText={(text) => setOtherText(qIndex, text)}
+              onSubmitEditing={handleSubmit}
               editable={!isResponding}
+              blurOnSubmit={false}
             />
           </View>
         );

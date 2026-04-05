@@ -75,6 +75,8 @@ interface ComposerProps {
   autoFocus?: boolean;
   /** Callback to expose the addImages function to parent components */
   onAddImages?: (addImages: (images: ImageAttachment[]) => void) => void;
+  /** Callback to expose a focus function to parent components (desktop only). */
+  onFocusInput?: (focus: () => void) => void;
   /** Optional draft context for listing commands before an agent exists. */
   commandDraftConfig?: DraftCommandConfig;
   /** Called when a message is about to be sent (any path: keyboard, dictation, queued). */
@@ -107,6 +109,7 @@ export function Composer({
   clearDraft,
   autoFocus = false,
   onAddImages,
+  onFocusInput,
   commandDraftConfig,
   onMessageSent,
   onComposerHeightChange,
@@ -212,6 +215,21 @@ export function Composer({
   useEffect(() => {
     onAddImages?.(addImages);
   }, [addImages, onAddImages]);
+
+  const focusInput = useCallback(() => {
+    if (Platform.OS !== "web") return;
+    focusWithRetries({
+      focus: () => messageInputRef.current?.focus(),
+      isFocused: () => {
+        const el = messageInputRef.current?.getNativeElement?.() ?? null;
+        return el != null && document.activeElement === el;
+      },
+    });
+  }, []);
+
+  useEffect(() => {
+    onFocusInput?.(focusInput);
+  }, [focusInput, onFocusInput]);
 
   const submitMessage = useCallback(
     async (text: string, images?: ImageAttachment[]) => {
@@ -422,12 +440,16 @@ export function Composer({
             },
           });
           return true;
+        case "message-input.send":
+          return messageInputRef.current?.runKeyboardAction("send") ?? false;
         case "message-input.dictation-toggle":
           messageInputRef.current?.runKeyboardAction("dictation-toggle");
           return true;
         case "message-input.dictation-cancel":
           messageInputRef.current?.runKeyboardAction("dictation-cancel");
           return true;
+        case "message-input.dictation-confirm":
+          return messageInputRef.current?.runKeyboardAction("dictation-confirm") ?? false;
         case "message-input.voice-toggle":
           messageInputRef.current?.runKeyboardAction("voice-toggle");
           return true;
@@ -445,8 +467,10 @@ export function Composer({
     handlerId: keyboardHandlerIdRef.current,
     actions: [
       "message-input.focus",
+      "message-input.send",
       "message-input.dictation-toggle",
       "message-input.dictation-cancel",
+      "message-input.dictation-confirm",
       "message-input.voice-toggle",
       "message-input.voice-mute-toggle",
     ],
@@ -621,7 +645,7 @@ export function Composer({
     resolveStatusControlMode(statusControls) === "draft" && statusControls ? (
       <DraftAgentStatusBar {...statusControls} />
     ) : (
-      <AgentStatusBar agentId={agentId} serverId={serverId} />
+      <AgentStatusBar agentId={agentId} serverId={serverId} onDropdownClose={focusInput} />
     );
 
   return (

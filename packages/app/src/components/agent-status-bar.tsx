@@ -3,10 +3,19 @@ import { View, Text, Platform, Pressable, Keyboard } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import { Brain, ChevronDown, ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react-native";
+import {
+  Brain,
+  ChevronDown,
+  ListTodo,
+  Settings2,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldOff,
+  Zap,
+} from "lucide-react-native";
 import { getProviderIcon } from "@/components/provider-icons";
 import { CombinedModelSelector } from "@/components/combined-model-selector";
-import { useProviderModels } from "@/hooks/use-provider-models";
+import { useQuery } from "@tanstack/react-query";
 import { useSessionStore } from "@/stores/session-store";
 import {
   buildFavoriteModelKey,
@@ -24,6 +33,7 @@ import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/com
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type {
+  AgentFeature,
   AgentMode,
   AgentModelDefinition,
   AgentProvider,
@@ -36,17 +46,19 @@ import {
   type AgentModeIcon,
 } from "@server/server/agent/provider-manifest";
 import {
+  getFeatureHighlightColor,
+  getFeatureTooltip,
   getStatusSelectorHint,
   resolveAgentModelSelection,
 } from "@/components/agent-status-bar.utils";
-
+import { isProviderModelsQueryLoading } from "@/components/agent-status-bar.model-loading";
 
 type StatusOption = {
   id: string;
   label: string;
 };
 
-type StatusSelector = "provider" | "mode" | "model" | "thinking";
+type StatusSelector = "provider" | "mode" | "model" | "thinking" | `feature-${string}`;
 
 const PROVIDER_DEFINITION_MAP = new Map(
   AGENT_PROVIDER_DEFINITIONS.map((definition) => [definition.id, definition]),
@@ -73,6 +85,9 @@ type ControlledAgentStatusBarProps = {
   canSelectModelProvider?: (providerId: string) => boolean;
   favoriteKeys?: Set<string>;
   onToggleFavoriteModel?: (provider: string, modelId: string) => void;
+  features?: AgentFeature[];
+  onSetFeature?: (featureId: string, value: unknown) => void;
+  onDropdownClose?: () => void;
 };
 
 export interface DraftAgentStatusBarProps {
@@ -92,12 +107,16 @@ export interface DraftAgentStatusBarProps {
   thinkingOptions: NonNullable<AgentModelDefinition["thinkingOptions"]>;
   selectedThinkingOptionId: string;
   onSelectThinkingOption: (thinkingOptionId: string) => void;
+  features?: AgentFeature[];
+  onSetFeature?: (featureId: string, value: unknown) => void;
+  onDropdownClose?: () => void;
   disabled?: boolean;
 }
 
 interface AgentStatusBarProps {
   agentId: string;
   serverId: string;
+  onDropdownClose?: () => void;
 }
 
 function findOptionLabel(
@@ -110,6 +129,38 @@ function findOptionLabel(
   }
   const selected = options.find((option) => option.id === selectedId);
   return selected?.label ?? fallback;
+}
+
+const FEATURE_ICONS: Record<string, typeof Zap> = {
+  "list-todo": ListTodo,
+  zap: Zap,
+};
+
+function getFeatureIcon(icon?: string) {
+  return (icon && FEATURE_ICONS[icon]) || Settings2;
+}
+
+function getFeatureIconColor(
+  featureId: string,
+  enabled: boolean,
+  palette: {
+    blue: { 400: string };
+    yellow: { 400: string };
+  },
+  foregroundMuted: string,
+): string {
+  if (!enabled) {
+    return foregroundMuted;
+  }
+
+  switch (getFeatureHighlightColor(featureId)) {
+    case "blue":
+      return palette.blue[400];
+    case "yellow":
+      return palette.yellow[400];
+    default:
+      return foregroundMuted;
+  }
 }
 
 const MODE_ICONS = {
@@ -162,6 +213,9 @@ function ControlledStatusBar({
   canSelectModelProvider,
   favoriteKeys = new Set<string>(),
   onToggleFavoriteModel,
+  features,
+  onSetFeature,
+  onDropdownClose,
 }: ControlledAgentStatusBarProps) {
   const { theme } = useUnistyles();
   const isWeb = Platform.OS === "web";
@@ -203,7 +257,8 @@ function ControlledStatusBar({
     Boolean(providerOptions?.length) ||
     Boolean(modeOptions?.length) ||
     canSelectModel ||
-    Boolean(thinkingOptions?.length);
+    Boolean(thinkingOptions?.length) ||
+    Boolean(features?.length);
 
   if (!hasAnyControl) {
     return null;
@@ -280,8 +335,11 @@ function ControlledStatusBar({
   const handleOpenChange = useCallback(
     (selector: StatusSelector) => (nextOpen: boolean) => {
       setOpenSelector(nextOpen ? selector : null);
+      if (!nextOpen) {
+        onDropdownClose?.();
+      }
     },
-    [],
+    [onDropdownClose],
   );
 
   const handleSelectorPress = useCallback(
@@ -352,6 +410,7 @@ function ControlledStatusBar({
                     onToggleFavorite={onToggleFavoriteModel}
                     isLoading={isModelLoading}
                     disabled={modelDisabled}
+                    onClose={onDropdownClose}
                   />
                 </View>
               </TooltipTrigger>
@@ -455,6 +514,105 @@ function ControlledStatusBar({
               />
             </>
           ) : null}
+
+          {features?.map((feature) => {
+            if (feature.type === "toggle") {
+              const FeatureIcon = getFeatureIcon(feature.icon);
+              return (
+                <Tooltip
+                  key={`feature-${feature.id}`}
+                  delayDuration={0}
+                  enabledOnDesktop
+                  enabledOnMobile={false}
+                >
+                  <TooltipTrigger asChild triggerRefProp="ref">
+                    <Pressable
+                      disabled={disabled}
+                      onPress={() => onSetFeature?.(feature.id, !feature.value)}
+                      style={({ pressed, hovered }) => [
+                        styles.modeIconBadge,
+                        hovered && styles.modeBadgeHovered,
+                        pressed && styles.modeBadgePressed,
+                        disabled && styles.disabledBadge,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={getFeatureTooltip(feature)}
+                      testID={`agent-feature-${feature.id}`}
+                    >
+                      <FeatureIcon
+                        size={theme.iconSize.md}
+                        color={getFeatureIconColor(
+                          feature.id,
+                          feature.value,
+                          theme.colors.palette,
+                          theme.colors.foregroundMuted,
+                        )}
+                      />
+                    </Pressable>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="center" offset={8}>
+                    <Text style={styles.tooltipText}>{getFeatureTooltip(feature)}</Text>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            }
+            if (feature.type === "select") {
+              const FeatureIcon = getFeatureIcon(feature.icon);
+              const selectedOption = feature.options.find((o) => o.id === feature.value);
+              return (
+                <DropdownMenu
+                  key={`feature-${feature.id}`}
+                  open={openSelector === `feature-${feature.id}`}
+                  onOpenChange={handleOpenChange(`feature-${feature.id}`)}
+                >
+                  <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+                    <TooltipTrigger asChild triggerRefProp="ref">
+                      <DropdownMenuTrigger
+                        disabled={disabled}
+                        style={({ pressed, hovered }) => [
+                          styles.modeBadge,
+                          hovered && styles.modeBadgeHovered,
+                          (pressed || openSelector === `feature-${feature.id}`) &&
+                            styles.modeBadgePressed,
+                          disabled && styles.disabledBadge,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={getFeatureTooltip(feature)}
+                        testID={`agent-feature-${feature.id}`}
+                      >
+                        <FeatureIcon
+                          size={theme.iconSize.md}
+                          color={theme.colors.foregroundMuted}
+                        />
+                        <Text style={styles.modeBadgeText}>
+                          {selectedOption?.label ?? feature.label}
+                        </Text>
+                        <ChevronDown
+                          size={theme.iconSize.sm}
+                          color={theme.colors.foregroundMuted}
+                        />
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center" offset={8}>
+                      <Text style={styles.tooltipText}>{getFeatureTooltip(feature)}</Text>
+                    </TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent side="top" align="start">
+                    {feature.options.map((option) => (
+                      <DropdownMenuItem
+                        key={option.id}
+                        selected={option.id === feature.value}
+                        onSelect={() => onSetFeature?.(feature.id, option.id)}
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            }
+            return null;
+          })}
         </>
       ) : (
         <>
@@ -499,6 +657,7 @@ function ControlledStatusBar({
                   onToggleFavorite={onToggleFavoriteModel}
                   isLoading={isModelLoading}
                   disabled={modelDisabled}
+                  onClose={onDropdownClose}
                   renderTrigger={({ selectedModelLabel }) => (
                     <View
                       style={[
@@ -593,6 +752,83 @@ function ControlledStatusBar({
                 </DropdownMenu>
               </View>
             ) : null}
+
+            {features?.map((feature) => {
+              if (feature.type === "toggle") {
+                const FeatureIcon = getFeatureIcon(feature.icon);
+                return (
+                  <View key={`feature-${feature.id}`} style={styles.sheetSection}>
+                    <Pressable
+                      disabled={disabled}
+                      onPress={() => onSetFeature?.(feature.id, !feature.value)}
+                      style={({ pressed }) => [
+                        styles.sheetSelect,
+                        pressed && styles.sheetSelectPressed,
+                        disabled && styles.disabledSheetSelect,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={getFeatureTooltip(feature)}
+                      testID={`agent-feature-${feature.id}`}
+                    >
+                      <FeatureIcon
+                        size={theme.iconSize.md}
+                        color={getFeatureIconColor(
+                          feature.id,
+                          feature.value,
+                          theme.colors.palette,
+                          theme.colors.foregroundMuted,
+                        )}
+                      />
+                      <Text style={styles.sheetSelectText}>{feature.label}</Text>
+                      <Text style={styles.modeBadgeText}>{feature.value ? "On" : "Off"}</Text>
+                    </Pressable>
+                  </View>
+                );
+              }
+              if (feature.type === "select") {
+                const selectedOption = feature.options.find((o) => o.id === feature.value);
+                return (
+                  <View key={`feature-${feature.id}`} style={styles.sheetSection}>
+                    <DropdownMenu
+                      open={openSelector === `feature-${feature.id}`}
+                      onOpenChange={handleOpenChange(`feature-${feature.id}`)}
+                    >
+                      <DropdownMenuTrigger
+                        disabled={disabled}
+                        style={({ pressed }) => [
+                          styles.sheetSelect,
+                          pressed && styles.sheetSelectPressed,
+                          disabled && styles.disabledSheetSelect,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={getFeatureTooltip(feature)}
+                        testID={`agent-feature-${feature.id}`}
+                      >
+                        <Text style={styles.sheetSelectText}>
+                          {selectedOption?.label ?? feature.label}
+                        </Text>
+                        <ChevronDown
+                          size={theme.iconSize.md}
+                          color={theme.colors.foregroundMuted}
+                        />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent side="top" align="start">
+                        {feature.options.map((option) => (
+                          <DropdownMenuItem
+                            key={option.id}
+                            selected={option.id === feature.value}
+                            onSelect={() => onSetFeature?.(feature.id, option.id)}
+                          >
+                            {option.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </View>
+                );
+              }
+              return null;
+            })}
           </AdaptiveModalSheet>
         </>
       )}
@@ -602,7 +838,7 @@ function ControlledStatusBar({
 
 const EMPTY_MODES: AgentMode[] = [];
 
-export function AgentStatusBar({ agentId, serverId }: AgentStatusBarProps) {
+export function AgentStatusBar({ agentId, serverId, onDropdownClose }: AgentStatusBarProps) {
   const { preferences, updatePreferences } = useFormPreferences();
   const agent = useSessionStore(
     useShallow((state) => {
@@ -614,6 +850,7 @@ export function AgentStatusBar({ agentId, serverId }: AgentStatusBarProps) {
             currentModeId: currentAgent.currentModeId,
             runtimeModelId: currentAgent.runtimeInfo?.model ?? null,
             model: currentAgent.model,
+            features: currentAgent.features,
             thinkingOptionId: currentAgent.thinkingOptionId,
           }
         : null;
@@ -626,15 +863,52 @@ export function AgentStatusBar({ agentId, serverId }: AgentStatusBarProps) {
   );
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
 
-  const { allProviderModels: providerModelsMap, isLoading: isProviderModelsLoading } =
-    useProviderModels(serverId);
+  const modelsQuery = useQuery({
+    queryKey: ["providerModels", serverId, agent?.provider ?? "__missing_provider__"],
+    enabled: Boolean(client && agent?.provider),
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      if (!client || !agent) {
+        throw new Error("Daemon client unavailable");
+      }
+      const payload = await client.listProviderModels(agent.provider, { cwd: agent.cwd });
+      if (payload.error) {
+        throw new Error(payload.error);
+      }
+      return payload.models ?? [];
+    },
+  });
 
   const agentProviderDefinitions = useMemo(() => {
     const definition = AGENT_PROVIDER_DEFINITIONS.find((d) => d.id === agent?.provider);
     return definition ? [definition] : [];
   }, [agent?.provider]);
 
-  const models = agent?.provider ? (providerModelsMap.get(agent.provider) ?? null) : null;
+  const agentProviderModelQuery = useQuery({
+    queryKey: ["providerModels", serverId, agent?.provider, agent?.cwd ?? ""],
+    enabled: Boolean(client && agent?.cwd && agent?.provider),
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      if (!client || !agent) {
+        throw new Error("Daemon client unavailable");
+      }
+      const payload = await client.listProviderModels(agent.provider, { cwd: agent.cwd });
+      if (payload.error) {
+        throw new Error(payload.error);
+      }
+      return payload.models ?? [];
+    },
+  });
+
+  const agentProviderModels = useMemo(() => {
+    const map = new Map<string, AgentModelDefinition[]>();
+    if (agent?.provider && agentProviderModelQuery.data) {
+      map.set(agent.provider, agentProviderModelQuery.data);
+    }
+    return map;
+  }, [agent?.provider, agentProviderModelQuery.data]);
+
+  const models = modelsQuery.data ?? null;
 
   const displayMode =
     availableModes.find((mode) => mode.id === agent?.currentModeId)?.label ||
@@ -682,7 +956,7 @@ export function AgentStatusBar({ agentId, serverId }: AgentStatusBarProps) {
       }
       selectedModeId={agent.currentModeId ?? undefined}
       providerDefinitions={agentProviderDefinitions}
-      allProviderModels={providerModelsMap}
+      allProviderModels={agentProviderModels}
       onSelectMode={(modeId) => {
         if (!client) {
           return;
@@ -745,7 +1019,17 @@ export function AgentStatusBar({ agentId, serverId }: AgentStatusBarProps) {
           console.warn("[AgentStatusBar] setAgentThinkingOption failed", error);
         });
       }}
-      isModelLoading={isProviderModelsLoading}
+      features={agent.features}
+      onSetFeature={(featureId, value) => {
+        if (!client) {
+          return;
+        }
+        void client.setAgentFeature(agentId, featureId, value).catch((error) => {
+          console.warn("[AgentStatusBar] setAgentFeature failed", error);
+        });
+      }}
+      isModelLoading={isProviderModelsQueryLoading(modelsQuery)}
+      onDropdownClose={onDropdownClose}
       disabled={!client}
     />
   );
@@ -768,6 +1052,9 @@ export function DraftAgentStatusBar({
   thinkingOptions,
   selectedThinkingOptionId,
   onSelectThinkingOption,
+  features,
+  onSetFeature,
+  onDropdownClose,
   disabled = false,
 }: DraftAgentStatusBarProps) {
   const isWeb = Platform.OS === "web";
@@ -812,6 +1099,7 @@ export function DraftAgentStatusBar({
           }}
           isLoading={isAllModelsLoading}
           disabled={disabled}
+          onClose={onDropdownClose}
         />
         <ControlledStatusBar
           provider={selectedProvider}
@@ -821,6 +1109,9 @@ export function DraftAgentStatusBar({
           thinkingOptions={mappedThinkingOptions.length > 0 ? mappedThinkingOptions : undefined}
           selectedThinkingOptionId={effectiveSelectedThinkingOption}
           onSelectThinkingOption={onSelectThinkingOption}
+          features={features}
+          onSetFeature={onSetFeature}
+          onDropdownClose={onDropdownClose}
           disabled={disabled}
         />
       </View>
@@ -833,28 +1124,32 @@ export function DraftAgentStatusBar({
   }));
 
   return (
-    <ControlledStatusBar
-      provider={selectedProvider}
-      providerDefinitions={providerDefinitions}
-      allProviderModels={allProviderModels}
-      modeOptions={mappedModeOptions}
-      selectedModeId={effectiveSelectedMode}
-      onSelectMode={onSelectMode}
-      modelOptions={modelOptions}
-      selectedModelId={selectedModel}
-      onSelectModel={(modelId) => onSelectModel(modelId)}
-      isModelLoading={isAllModelsLoading}
-      favoriteKeys={favoriteKeys}
-      onToggleFavoriteModel={(provider, modelId) => {
-        void updatePreferences(toggleFavoriteModel({ preferences, provider, modelId })).catch((error) => {
-          console.warn("[DraftAgentStatusBar] toggle favorite model failed", error);
-        });
-      }}
-      thinkingOptions={mappedThinkingOptions.length > 0 ? mappedThinkingOptions : undefined}
-      selectedThinkingOptionId={effectiveSelectedThinkingOption}
-      onSelectThinkingOption={onSelectThinkingOption}
-      disabled={disabled}
-    />
+    <>
+      <ControlledStatusBar
+        provider={selectedProvider}
+        providerDefinitions={providerDefinitions}
+        allProviderModels={allProviderModels}
+        modeOptions={mappedModeOptions}
+        selectedModeId={effectiveSelectedMode}
+        onSelectMode={onSelectMode}
+        modelOptions={modelOptions}
+        selectedModelId={selectedModel}
+        onSelectModel={(modelId) => onSelectModel(modelId)}
+        isModelLoading={isAllModelsLoading}
+        favoriteKeys={favoriteKeys}
+        onToggleFavoriteModel={(provider, modelId) => {
+          void updatePreferences(toggleFavoriteModel({ preferences, provider, modelId })).catch((error) => {
+            console.warn("[DraftAgentStatusBar] toggle favorite model failed", error);
+          });
+        }}
+        thinkingOptions={mappedThinkingOptions.length > 0 ? mappedThinkingOptions : undefined}
+        selectedThinkingOptionId={effectiveSelectedThinkingOption}
+        onSelectThinkingOption={onSelectThinkingOption}
+        features={features}
+        onSetFeature={onSetFeature}
+        disabled={disabled}
+      />
+    </>
   );
 }
 

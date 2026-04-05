@@ -147,6 +147,7 @@ export function WorkspaceDraftAgentTab({
         title: "Agent",
         cwd: workspaceDirectory,
         model,
+        features: composerState.statusControls.features,
         thinkingOptionId,
         labels: {},
       };
@@ -166,6 +167,7 @@ export function WorkspaceDraftAgentTab({
           : {}),
         model: composerState.effectiveModelId || undefined,
         thinkingOptionId: composerState.effectiveThinkingOptionId || undefined,
+        featureValues: composerState.featureValues,
       });
 
       const imagesData = await encodeImages(images);
@@ -194,6 +196,63 @@ export function WorkspaceDraftAgentTab({
   const handleAddImagesCallback = useCallback((addImages: (images: ImageAttachment[]) => void) => {
     addImagesRef.current = addImages;
   }, []);
+
+  const focusInputRef = useRef<(() => void) | null>(null);
+
+  const handleFocusInputCallback = useCallback((focus: () => void) => {
+    focusInputRef.current = focus;
+  }, []);
+
+  const handleProviderSelectWithFocus = useCallback(
+    (provider: Parameters<typeof composerState.setProviderFromUser>[0]) => {
+      composerState.setProviderFromUser(provider);
+      focusInputRef.current?.();
+    },
+    [composerState],
+  );
+
+  const handleModeSelectWithFocus = useCallback(
+    (modeId: string) => {
+      composerState.setModeFromUser(modeId);
+      focusInputRef.current?.();
+    },
+    [composerState],
+  );
+
+  const handleModelSelectWithFocus = useCallback(
+    (modelId: string) => {
+      composerState.setModelFromUser(modelId);
+      focusInputRef.current?.();
+    },
+    [composerState],
+  );
+
+  const handleProviderAndModelSelectWithFocus = useCallback(
+    (
+      provider: Parameters<typeof composerState.setProviderAndModelFromUser>[0],
+      modelId: string,
+    ) => {
+      composerState.setProviderAndModelFromUser(provider, modelId);
+      focusInputRef.current?.();
+    },
+    [composerState],
+  );
+
+  const handleThinkingOptionSelectWithFocus = useCallback(
+    (optionId: string) => {
+      composerState.setThinkingOptionFromUser(optionId);
+      focusInputRef.current?.();
+    },
+    [composerState],
+  );
+
+  const handleSetFeatureWithFocus = useCallback(
+    (featureId: string, value: unknown) => {
+      composerState.statusControls.onSetFeature?.(featureId, value);
+      focusInputRef.current?.();
+    },
+    [composerState],
+  );
 
   return (
     <FileDropZone onFilesDropped={handleFilesDropped}>
@@ -242,9 +301,17 @@ export function WorkspaceDraftAgentTab({
             clearDraft={draftInput.clear}
             autoFocus={shouldAutoFocusWorkspaceDraftComposer({ isPaneFocused, isSubmitting })}
             onAddImages={handleAddImagesCallback}
+            onFocusInput={handleFocusInputCallback}
             commandDraftConfig={composerState.commandDraftConfig}
             statusControls={{
               ...composerState.statusControls,
+              onSelectProvider: handleProviderSelectWithFocus,
+              onSelectMode: handleModeSelectWithFocus,
+              onSelectModel: handleModelSelectWithFocus,
+              onSelectProviderAndModel: handleProviderAndModelSelectWithFocus,
+              onSelectThinkingOption: handleThinkingOptionSelectWithFocus,
+              onSetFeature: handleSetFeatureWithFocus,
+              onDropdownClose: () => focusInputRef.current?.(),
               disabled: isSubmitting,
             }}
           />

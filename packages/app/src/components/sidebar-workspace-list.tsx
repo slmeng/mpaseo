@@ -10,7 +10,7 @@ import {
   type GestureResponderEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useQueries } from "@tanstack/react-query";
+import { useMutation, useQueries } from "@tanstack/react-query";
 import {
   useCallback,
   useMemo,
@@ -39,6 +39,7 @@ import {
   Monitor,
   MoreVertical,
   Plus,
+  Trash2,
 } from "lucide-react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { DraggableList, type DraggableRenderItemInfo } from "./draggable-list";
@@ -47,6 +48,7 @@ import { getHostRuntimeStore, isHostRuntimeConnected } from "@/runtime/host-runt
 import { getIsElectronRuntime, isCompactFormFactor } from "@/constants/layout";
 import { projectIconQueryKey } from "@/hooks/use-project-icon-query";
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
+import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import {
   type SidebarProjectEntry,
   type SidebarWorkspaceEntry,
@@ -84,7 +86,7 @@ import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import { type PrHint, useWorkspacePrHint } from "@/hooks/use-checkout-pr-status-query";
 import { buildSidebarProjectRowModel } from "@/utils/sidebar-project-row-model";
 import { useNavigationActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useSessionStore } from "@/stores/session-store";
+import { normalizeWorkspaceDescriptor, useSessionStore } from "@/stores/session-store";
 import { useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { buildWorkspaceArchiveRedirectRoute } from "@/utils/workspace-archive-navigation";
 import { openExternalUrl } from "@/utils/open-external-url";
@@ -93,6 +95,7 @@ import {
   resolveWorkspaceExecutionDirectory,
 } from "@/utils/workspace-execution";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
+import { createNameId } from "mnemonic-id";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -150,6 +153,8 @@ interface ProjectHeaderRowProps {
   isDragging: boolean;
   isArchiving?: boolean;
   menuController: ReturnType<typeof useContextMenu> | null;
+  onRemoveProject?: () => void;
+  removeProjectStatus?: "idle" | "pending";
   dragHandleProps?: DraggableListDragHandleProps;
 }
 
@@ -702,24 +707,25 @@ function ProjectHeaderRow({
   canCreateWorktree,
   isProjectActive = false,
   onWorkspacePress,
+  onWorktreeCreated,
   shortcutNumber = null,
   showShortcutBadge = false,
   drag,
   isDragging,
   isArchiving = false,
   menuController,
+  onRemoveProject,
+  removeProjectStatus = "idle",
   dragHandleProps,
 }: ProjectHeaderRowProps) {
+  const { theme } = useUnistyles();
   const [isHovered, setIsHovered] = useState(false);
   const isMobileBreakpoint = isCompactFormFactor();
   const beginWorkspaceSetup = useWorkspaceSetupStore((state) => state.beginWorkspaceSetup);
-
   const handleBeginWorkspaceSetup = useCallback(() => {
     if (!serverId) {
       return;
     }
-
-    onWorkspacePress?.();
     beginWorkspaceSetup({
       serverId,
       sourceDirectory: project.iconWorkingDir,
@@ -727,12 +733,13 @@ function ProjectHeaderRow({
       creationMethod: "create_worktree",
       navigationMethod: "navigate",
     });
+    onWorkspacePress?.();
   }, [beginWorkspaceSetup, displayName, onWorkspacePress, project.iconWorkingDir, serverId]);
 
   useKeyboardActionHandler({
     handlerId: `worktree-new-${project.projectKey}`,
     actions: ["worktree.new"],
-    enabled: isProjectActive && canCreateWorktree,
+    enabled: isProjectActive && canCreateWorktree && Boolean(serverId),
     priority: 0,
     handle: () => {
       handleBeginWorkspaceSetup();
@@ -776,16 +783,54 @@ function ProjectHeaderRow({
           </Text>
         </View>
       </View>
-      {canCreateWorktree ? (
-        <NewWorktreeButton
-          displayName={displayName}
-          onPress={handleBeginWorkspaceSetup}
-          visible={isHovered || isMobileBreakpoint}
-          loading={false}
-          showShortcutHint={isProjectActive}
-          testID={`sidebar-project-new-worktree-${project.projectKey}`}
-        />
-      ) : null}
+      <View style={styles.projectTrailingActions}>
+        {canCreateWorktree ? (
+          <NewWorktreeButton
+            displayName={displayName}
+            onPress={handleBeginWorkspaceSetup}
+            visible={isHovered || isMobileBreakpoint}
+            showShortcutHint={isProjectActive}
+            testID={`sidebar-project-new-worktree-${project.projectKey}`}
+          />
+        ) : null}
+        {onRemoveProject ? (
+          <View
+            style={!(isHovered || isMobileBreakpoint) && styles.projectKebabButtonHidden}
+            pointerEvents={isHovered || isMobileBreakpoint ? "auto" : "none"}
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                hitSlop={8}
+                style={({ hovered = false }) => [
+                  styles.projectKebabButton,
+                  hovered && styles.projectKebabButtonHovered,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Project actions"
+                testID={`sidebar-project-kebab-${project.projectKey}`}
+              >
+                {({ hovered }) => (
+                  <MoreVertical
+                    size={14}
+                    color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                  />
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" width={220}>
+                <DropdownMenuItem
+                  testID={`sidebar-project-menu-remove-${project.projectKey}`}
+                  leading={<Trash2 size={14} color={theme.colors.foregroundMuted} />}
+                  status={removeProjectStatus}
+                  pendingLabel="Removing..."
+                  onSelect={onRemoveProject}
+                >
+                  Remove project
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </View>
+        ) : null}
+      </View>
       {showShortcutBadge && shortcutNumber !== null ? (
         <View style={styles.shortcutBadge}>
           <Text style={styles.shortcutBadgeText}>{shortcutNumber}</Text>
@@ -1406,6 +1451,8 @@ function FlattenedProjectRow({
   isDragging,
   dragHandleProps,
   isProjectActive = false,
+  onRemoveProject,
+  removeProjectStatus,
 }: {
   project: SidebarProjectEntry;
   displayName: string;
@@ -1421,6 +1468,8 @@ function FlattenedProjectRow({
   isDragging: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
   isProjectActive?: boolean;
+  onRemoveProject?: () => void;
+  removeProjectStatus?: "idle" | "pending";
 }) {
   if (project.projectKind === "directory") {
     return (
@@ -1459,6 +1508,8 @@ function FlattenedProjectRow({
       drag={drag}
       isDragging={isDragging}
       menuController={null}
+      onRemoveProject={onRemoveProject}
+      removeProjectStatus={removeProjectStatus}
       dragHandleProps={dragHandleProps}
     />
   );
@@ -1629,6 +1680,48 @@ function ProjectBlock({
     [onWorkspaceReorder, project.projectKey],
   );
 
+  const toast = useToast();
+  const [isRemovingProject, setIsRemovingProject] = useState(false);
+
+  const handleRemoveProject = useCallback(() => {
+    if (isRemovingProject || !serverId) {
+      return;
+    }
+
+    void (async () => {
+      const confirmed = await confirmDialog({
+        title: "Remove project?",
+        message: `Remove "${displayName}" from the sidebar?\n\nFiles on disk will not be changed.`,
+        confirmLabel: "Remove",
+        cancelLabel: "Cancel",
+        destructive: true,
+      });
+      if (!confirmed) {
+        return;
+      }
+
+      const client = getHostRuntimeStore().getClient(serverId);
+      if (!client) {
+        toast.error("Host is not connected");
+        return;
+      }
+
+      setIsRemovingProject(true);
+      try {
+        for (const ws of project.workspaces) {
+          const payload = await client.archiveWorkspace(Number(ws.workspaceId));
+          if (payload.error) {
+            throw new Error(payload.error);
+          }
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to remove project");
+      } finally {
+        setIsRemovingProject(false);
+      }
+    })();
+  }, [isRemovingProject, serverId, displayName, toast, project.workspaces]);
+
   return (
     <View style={styles.projectBlock}>
       {rowModel.kind === "workspace_link" ? (
@@ -1653,6 +1746,8 @@ function ProjectBlock({
           isDragging={isDragging}
           dragHandleProps={dragHandleProps}
           isProjectActive={isProjectActive}
+          onRemoveProject={handleRemoveProject}
+          removeProjectStatus={isRemovingProject ? "pending" : "idle"}
         />
       ) : (
         <>
@@ -1671,7 +1766,10 @@ function ProjectBlock({
             onWorktreeCreated={onWorktreeCreated}
             drag={drag}
             isDragging={isDragging}
+            isArchiving={isRemovingProject}
             menuController={null}
+            onRemoveProject={handleRemoveProject}
+            removeProjectStatus={isRemovingProject ? "pending" : "idle"}
             dragHandleProps={dragHandleProps}
           />
 
@@ -2171,6 +2269,26 @@ const styles = StyleSheet.create((theme) => ({
   },
   projectIconActionButtonHidden: {
     opacity: 0,
+  },
+  projectTrailingActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    flexShrink: 0,
+  },
+  projectKebabButton: {
+    width: 24,
+    height: 24,
+    borderRadius: theme.borderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  projectKebabButtonHidden: {
+    opacity: 0,
+  },
+  projectKebabButtonHovered: {
+    backgroundColor: theme.colors.surface2,
   },
   projectTrailingControlSlot: {
     width: 24,

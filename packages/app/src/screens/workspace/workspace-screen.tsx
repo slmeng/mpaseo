@@ -70,6 +70,7 @@ import {
 } from "@/utils/workspace-tab-identity";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useProviderModels } from "@/hooks/use-provider-models";
+import { useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
 import {
   checkoutStatusQueryKey,
@@ -121,6 +122,7 @@ import { findAdjacentPane } from "@/utils/split-navigation";
 import { isCompactFormFactor, supportsDesktopPaneSplits } from "@/constants/layout";
 
 const TERMINALS_QUERY_STALE_TIME = 5_000;
+const WORKSPACE_SETUP_AUTO_OPEN_WINDOW_MS = 30_000;
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
 const EMPTY_SET = new Set<string>();
 
@@ -858,6 +860,9 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
   const workspaceLayout = useWorkspaceLayoutStore((state) =>
     persistenceKey ? (state.layoutByWorkspace[persistenceKey] ?? null) : null,
   );
+  const workspaceSetupSnapshot = useWorkspaceSetupStore((state) =>
+    persistenceKey ? state.snapshots[persistenceKey] ?? null : null,
+  );
   const uiTabs = useMemo(
     () => (workspaceLayout ? collectAllTabs(workspaceLayout.root) : EMPTY_UI_TABS),
     [workspaceLayout],
@@ -1013,6 +1018,14 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
     () => focusedPaneTabState.tabs.map((tab) => tab.descriptor),
     [focusedPaneTabState.tabs],
   );
+  const hasSetupTab = useMemo(
+    () =>
+      uiTabs.some(
+        (tab) =>
+          tab.target.kind === "setup" && tab.target.workspaceId === normalizedWorkspaceId,
+      ),
+    [normalizedWorkspaceId, uiTabs],
+  );
 
   const navigateToTabId = useCallback(
     function navigateToTabId(tabId: string) {
@@ -1025,6 +1038,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
   );
 
   const emptyWorkspaceSeedRef = useRef<string | null>(null);
+  const autoOpenedSetupTabWorkspaceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!persistenceKey) {
       return;
@@ -1051,6 +1065,56 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
     terminals.length,
     tabs.length,
     workspaceAgentVisibility.activeAgentIds.size,
+  ]);
+
+  useEffect(() => {
+    if (!persistenceKey) {
+      return;
+    }
+    if (!workspaceSetupSnapshot) {
+      if (autoOpenedSetupTabWorkspaceRef.current === persistenceKey) {
+        autoOpenedSetupTabWorkspaceRef.current = null;
+      }
+      return;
+    }
+
+    const snapshotAge = Date.now() - workspaceSetupSnapshot.updatedAt;
+    const shouldAutoOpen =
+      workspaceSetupSnapshot.status === "running" ||
+      snapshotAge <= WORKSPACE_SETUP_AUTO_OPEN_WINDOW_MS;
+    if (!shouldAutoOpen) {
+      return;
+    }
+    if (hasSetupTab) {
+      autoOpenedSetupTabWorkspaceRef.current = persistenceKey;
+      return;
+    }
+    if (autoOpenedSetupTabWorkspaceRef.current === persistenceKey) {
+      return;
+    }
+
+    const target = normalizeWorkspaceTabTarget({
+      kind: "setup",
+      workspaceId: normalizedWorkspaceId,
+    });
+    if (!target) {
+      return;
+    }
+
+    const tabId = openWorkspaceTab(persistenceKey, target);
+    if (!tabId) {
+      return;
+    }
+
+    focusWorkspaceTab(persistenceKey, tabId);
+    autoOpenedSetupTabWorkspaceRef.current = persistenceKey;
+  }, [
+    focusWorkspaceTab,
+    hasSetupTab,
+    normalizedWorkspaceId,
+    openWorkspaceTab,
+    persistenceKey,
+    workspaceSetupSnapshot,
   ]);
 
   const handleOpenFileFromExplorer = useCallback(

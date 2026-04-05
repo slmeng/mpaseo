@@ -129,6 +129,11 @@ export function useKeyboardShortcuts({
             id: "message-input.focus",
             scope: "message-input",
           });
+        case "send":
+          return keyboardActionDispatcher.dispatch({
+            id: "message-input.send",
+            scope: "message-input",
+          });
         case "dictation-toggle":
           return keyboardActionDispatcher.dispatch({
             id: "message-input.dictation-toggle",
@@ -137,6 +142,11 @@ export function useKeyboardShortcuts({
         case "dictation-cancel":
           return keyboardActionDispatcher.dispatch({
             id: "message-input.dictation-cancel",
+            scope: "message-input",
+          });
+        case "dictation-confirm":
+          return keyboardActionDispatcher.dispatch({
+            id: "message-input.dictation-confirm",
             scope: "message-input",
           });
         case "voice-toggle":

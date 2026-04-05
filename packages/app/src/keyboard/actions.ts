@@ -11,6 +11,7 @@ export type MessageInputKeyboardActionKind =
   | "queue"
   | "dictation-toggle"
   | "dictation-cancel"
+  | "dictation-confirm"
   | "voice-toggle"
   | "voice-mute-toggle";
 

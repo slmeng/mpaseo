@@ -7,6 +7,7 @@ import {
   type CreateAgentInitialValues,
   type UseAgentFormStateResult,
 } from "@/hooks/use-agent-form-state";
+import { useDraftAgentFeatures } from "@/hooks/use-draft-agent-features";
 import { useDraftStore } from "@/stores/draft-store";
 import type { AgentModelDefinition } from "@server/server/agent/agent-sdk-types";
 
@@ -35,6 +36,7 @@ type DraftComposerState = UseAgentFormStateResult & {
   workingDir: string;
   effectiveModelId: string;
   effectiveThinkingOptionId: string;
+  featureValues: Record<string, unknown> | undefined;
   statusControls: DraftAgentStatusBarProps;
   commandDraftConfig: DraftCommandConfig | undefined;
 };
@@ -116,6 +118,7 @@ function buildDraftComposerCommandConfig(input: {
   selectedMode: string;
   effectiveModelId: string;
   effectiveThinkingOptionId: string;
+  featureValues?: Record<string, unknown>;
 }): DraftCommandConfig | undefined {
   const cwd = input.cwd.trim();
   if (!cwd) {
@@ -130,13 +133,17 @@ function buildDraftComposerCommandConfig(input: {
     ...(input.effectiveThinkingOptionId
       ? { thinkingOptionId: input.effectiveThinkingOptionId }
       : {}),
+    ...(input.featureValues ? { featureValues: input.featureValues } : {}),
   };
 }
 
 function buildDraftStatusControls(input: {
   formState: UseAgentFormStateResult;
+  features?: DraftAgentStatusBarProps["features"];
+  onSetFeature?: DraftAgentStatusBarProps["onSetFeature"];
+  onDropdownClose?: DraftAgentStatusBarProps["onDropdownClose"];
 }): DraftAgentStatusBarProps {
-  const { formState } = input;
+  const { formState, features, onSetFeature, onDropdownClose } = input;
   return {
     providerDefinitions: formState.providerDefinitions,
     selectedProvider: formState.selectedProvider,
@@ -154,6 +161,9 @@ function buildDraftStatusControls(input: {
     thinkingOptions: formState.availableThinkingOptions,
     selectedThinkingOptionId: formState.selectedThinkingOptionId,
     onSelectThinkingOption: formState.setThinkingOptionFromUser,
+    features,
+    onSetFeature,
+    onDropdownClose,
   };
 }
 
@@ -316,6 +326,18 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   );
 
   const workingDir = lockedWorkingDir || formState.workingDir;
+  const {
+    features: draftFeatures,
+    featureValues: draftFeatureValues,
+    setFeatureValue: setDraftFeatureValue,
+  } = useDraftAgentFeatures({
+    serverId: formState.selectedServerId,
+    provider: formState.selectedProvider,
+    cwd: workingDir,
+    modeId: formState.selectedMode,
+    modelId: effectiveModelId,
+    thinkingOptionId: effectiveThinkingOptionId,
+  });
 
   const commandDraftConfig = useMemo(
     () =>
@@ -327,12 +349,14 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
             selectedMode: formState.selectedMode,
             effectiveModelId,
             effectiveThinkingOptionId,
+            featureValues: draftFeatureValues,
           })
         : undefined,
     [
       composerOptions,
       effectiveModelId,
       effectiveThinkingOptionId,
+      draftFeatureValues,
       workingDir,
       formState.modeOptions,
       formState.selectedMode,
@@ -350,7 +374,12 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       workingDir,
       effectiveModelId,
       effectiveThinkingOptionId,
-      statusControls: buildDraftStatusControls({ formState }),
+      featureValues: draftFeatureValues,
+      statusControls: buildDraftStatusControls({
+        formState,
+        features: draftFeatures,
+        onSetFeature: setDraftFeatureValue,
+      }),
       commandDraftConfig,
     };
   }, [
@@ -358,7 +387,10 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     composerOptions,
     effectiveModelId,
     effectiveThinkingOptionId,
+    draftFeatures,
+    draftFeatureValues,
     formState,
+    setDraftFeatureValue,
     workingDir,
   ]);
 

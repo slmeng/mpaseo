@@ -21,6 +21,7 @@ import {
   Info,
   Shield,
   Puzzle,
+  Blocks,
 } from "lucide-react-native";
 import { useAppSettings, type AppSettings } from "@/hooks/use-settings";
 import type { HostProfile, HostConnection } from "@/types/host-connection";
@@ -62,6 +63,11 @@ import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pc
 import { useVoiceAudioEngineOptional } from "@/contexts/voice-context";
 import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 import { isCompactFormFactor } from "@/constants/layout";
+import { AGENT_PROVIDER_DEFINITIONS } from "@server/server/agent/provider-manifest";
+import { getProviderIcon } from "@/components/provider-icons";
+import { ProviderDiagnosticSheet } from "@/components/provider-diagnostic-sheet";
+import { StatusBadge } from "@/components/ui/status-badge";
+import type { ProviderSnapshotEntry } from "@server/server/agent/agent-sdk-types";
 
 // ---------------------------------------------------------------------------
 // Section definitions
@@ -72,6 +78,7 @@ type SettingsSectionId =
   | "appearance"
   | "shortcuts"
   | "integrations"
+  | "providers"
   | "diagnostics"
   | "about"
   | "permissions"
@@ -99,6 +106,7 @@ function getSettingsSections(context: { isDesktopApp: boolean }): SettingsSectio
   }
 
   sections.push(
+    { id: "providers", label: "Providers", icon: Blocks },
     { id: "diagnostics", label: "Diagnostics", icon: Stethoscope },
     { id: "about", label: "About", icon: Info },
   );
@@ -417,6 +425,121 @@ function AppearanceSection({ settings, handleThemeChange }: AppearanceSectionPro
   );
 }
 
+interface ProvidersSectionProps {
+  routeServerId: string;
+}
+
+function ProvidersSection({ routeServerId }: ProvidersSectionProps) {
+  const { theme } = useUnistyles();
+  const client = useHostRuntimeClient(routeServerId);
+  const isConnected = useHostRuntimeIsConnected(routeServerId);
+  const [entries, setEntries] = useState<ProviderSnapshotEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [diagnosticProvider, setDiagnosticProvider] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!client || !isConnected) {
+      setEntries([]);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    client
+      .getProvidersSnapshot()
+      .then((result) => {
+        if (!cancelled) setEntries(result.entries);
+      })
+      .catch(() => {
+        if (!cancelled) setEntries([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client, isConnected]);
+
+  const hasServer = routeServerId.length > 0;
+
+  return (
+    <>
+      <View style={settingsStyles.section}>
+        <Text style={settingsStyles.sectionTitle}>Providers</Text>
+        {!hasServer || !isConnected ? (
+          <View style={[settingsStyles.card, styles.emptyCard]}>
+            <Text style={styles.emptyText}>Connect to a host to see providers</Text>
+          </View>
+        ) : loading ? (
+          <View style={[settingsStyles.card, styles.emptyCard]}>
+            <Text style={styles.emptyText}>Loading...</Text>
+          </View>
+        ) : (
+          <View style={[settingsStyles.card, styles.audioCard]}>
+            {AGENT_PROVIDER_DEFINITIONS.map((def) => {
+              const entry = entries.find((e) => e.provider === def.id);
+              const status = entry?.status ?? "unavailable";
+              const ProviderIcon = getProviderIcon(def.id);
+
+              return (
+                <View key={def.id} style={styles.audioRow}>
+                  <View
+                    style={[
+                      styles.audioRowContent,
+                      { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+                    ]}
+                  >
+                    <ProviderIcon size={theme.iconSize.sm} color={theme.colors.foreground} />
+                    <Text style={styles.audioRowTitle}>{def.label}</Text>
+                  </View>
+                  <View style={styles.providerActions}>
+                    <StatusBadge
+                      label={
+                        status === "ready"
+                          ? "Available"
+                          : status === "error"
+                            ? "Error"
+                            : status === "loading"
+                              ? "Loading..."
+                              : "Not installed"
+                      }
+                      variant={
+                        status === "ready"
+                          ? "success"
+                          : status === "error"
+                            ? "error"
+                            : "muted"
+                      }
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onPress={() => setDiagnosticProvider(def.id)}
+                    >
+                      Diagnostic
+                    </Button>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      {diagnosticProvider ? (
+        <ProviderDiagnosticSheet
+          provider={diagnosticProvider}
+          visible
+          onClose={() => setDiagnosticProvider(null)}
+          serverId={routeServerId}
+        />
+      ) : null}
+    </>
+  );
+}
+
 
 interface DiagnosticsSectionProps {
   voiceAudioEngine: ReturnType<typeof useVoiceAudioEngineOptional>;
@@ -486,6 +609,7 @@ interface SettingsSectionContentProps {
   sectionId: SettingsSectionId;
   hostsProps: HostsSectionProps;
   appearanceProps: AppearanceSectionProps;
+  providersProps: ProvidersSectionProps;
   diagnosticsProps: DiagnosticsSectionProps;
   aboutProps: AboutSectionProps;
   appVersion: string | null;
@@ -497,6 +621,7 @@ function SettingsSectionContent({
   sectionId,
   hostsProps,
   appearanceProps,
+  providersProps,
   diagnosticsProps,
   aboutProps,
   appVersion,
@@ -510,6 +635,8 @@ function SettingsSectionContent({
       return <AppearanceSection {...appearanceProps} />;
     case "shortcuts":
       return <KeyboardShortcutsSection />;
+    case "providers":
+      return <ProvidersSection {...providersProps} />;
     case "diagnostics":
       return <DiagnosticsSection {...diagnosticsProps} />;
     case "about":
@@ -567,7 +694,7 @@ function SettingsDesktopLayout({ sections, sectionContentProps }: SettingsLayout
           const isSelected = section.id === selectedSectionId;
           const IconComponent = section.icon;
           const showSeparator =
-            section.id === "integrations" || section.id === "diagnostics";
+            section.id === "integrations" || section.id === "providers";
           return (
             <View key={section.id}>
               {showSeparator ? <View style={desktopStyles.sidebarSeparator} /> : null}
@@ -939,6 +1066,10 @@ export default function SettingsScreen() {
     handleThemeChange,
   };
 
+  const providersProps: ProvidersSectionProps = {
+    routeServerId,
+  };
+
   const diagnosticsProps: DiagnosticsSectionProps = {
     voiceAudioEngine,
     isPlaybackTestRunning,
@@ -954,6 +1085,7 @@ export default function SettingsScreen() {
   const sectionContentProps: Omit<SettingsSectionContentProps, "sectionId"> = {
     hostsProps,
     appearanceProps,
+    providersProps,
     diagnosticsProps,
     aboutProps,
     appVersion,
@@ -1760,6 +1892,11 @@ const styles = StyleSheet.create((theme) => ({
   audioRowTitle: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
+  },
+  providerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
   },
   aboutValue: {
     color: theme.colors.foregroundMuted,

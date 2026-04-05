@@ -861,6 +861,14 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   },
 
   {
+    id: "message-input-dictation-confirm-enter",
+    action: "message-input.action",
+    combo: "Enter",
+    when: { commandCenter: false, terminal: false },
+    payload: { type: "message-input", kind: "dictation-confirm" },
+  },
+
+  {
     id: "message-input-voice-mute-toggle",
     action: "message-input.action",
     combo: "Space",

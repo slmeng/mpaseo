@@ -54,6 +54,8 @@ import type {
   AgentPermissionRequest,
   AgentPermissionResponse,
   AgentPersistenceHandle,
+  ProviderSnapshotEntry,
+  ProviderStatus,
   AgentRuntimeInfo,
   AgentTimelineItem,
   ToolCallDetail,
@@ -68,6 +70,13 @@ const AgentModeSchema: z.ZodType<AgentMode> = z.object({
   label: z.string(),
   description: z.string().optional(),
 });
+
+const ProviderStatusSchema: z.ZodType<ProviderStatus> = z.enum([
+  "ready",
+  "loading",
+  "error",
+  "unavailable",
+]);
 
 const AgentSelectOptionSchema = z.object({
   id: z.string(),
@@ -112,6 +121,15 @@ const AgentModelDefinitionSchema: z.ZodType<AgentModelDefinition> = z.object({
   metadata: z.record(z.unknown()).optional(),
   thinkingOptions: z.array(AgentSelectOptionSchema).optional(),
   defaultThinkingOptionId: z.string().optional(),
+});
+
+const ProviderSnapshotEntrySchema: z.ZodType<ProviderSnapshotEntry> = z.object({
+  provider: AgentProviderSchema,
+  status: ProviderStatusSchema,
+  error: z.string().optional(),
+  models: z.array(AgentModelDefinitionSchema).optional(),
+  modes: z.array(AgentModeSchema).optional(),
+  fetchedAt: z.string().optional(),
 });
 
 const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z.object({
@@ -776,6 +794,24 @@ export const ListAvailableProvidersRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+export const GetProvidersSnapshotRequestMessageSchema = z.object({
+  type: z.literal("get_providers_snapshot_request"),
+  cwd: z.string().optional(),
+  requestId: z.string(),
+});
+
+export const RefreshProvidersSnapshotRequestMessageSchema = z.object({
+  type: z.literal("refresh_providers_snapshot_request"),
+  cwd: z.string().optional(),
+  requestId: z.string(),
+});
+
+export const ProviderDiagnosticRequestMessageSchema = z.object({
+  type: z.literal("provider_diagnostic_request"),
+  provider: AgentProviderSchema,
+  requestId: z.string(),
+});
+
 export const ResumeAgentRequestMessageSchema = z.object({
   type: z.literal("resume_agent_request"),
   handle: AgentPersistenceHandleSchema,
@@ -1289,6 +1325,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ListProviderModesRequestMessageSchema,
   ListProviderFeaturesRequestMessageSchema,
   ListAvailableProvidersRequestMessageSchema,
+  GetProvidersSnapshotRequestMessageSchema,
+  RefreshProvidersSnapshotRequestMessageSchema,
+  ProviderDiagnosticRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
   RefreshAgentRequestMessageSchema,
   CancelAgentRequestMessageSchema,
@@ -2284,6 +2323,41 @@ export const ListAvailableProvidersResponseSchema = z.object({
   }),
 });
 
+export const GetProvidersSnapshotResponseMessageSchema = z.object({
+  type: z.literal("get_providers_snapshot_response"),
+  payload: z.object({
+    entries: z.array(ProviderSnapshotEntrySchema),
+    generatedAt: z.string(),
+    requestId: z.string(),
+  }),
+});
+
+export const ProvidersSnapshotUpdateMessageSchema = z.object({
+  type: z.literal("providers_snapshot_update"),
+  payload: z.object({
+    cwd: z.string().optional(),
+    entries: z.array(ProviderSnapshotEntrySchema),
+    generatedAt: z.string(),
+  }),
+});
+
+export const RefreshProvidersSnapshotResponseMessageSchema = z.object({
+  type: z.literal("refresh_providers_snapshot_response"),
+  payload: z.object({
+    requestId: z.string(),
+    acknowledged: z.boolean(),
+  }),
+});
+
+export const ProviderDiagnosticResponseMessageSchema = z.object({
+  type: z.literal("provider_diagnostic_response"),
+  payload: z.object({
+    provider: AgentProviderSchema,
+    diagnostic: z.string(),
+    requestId: z.string(),
+  }),
+});
+
 const AgentSlashCommandSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -2482,6 +2556,10 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ListProviderModesResponseMessageSchema,
   ListProviderFeaturesResponseMessageSchema,
   ListAvailableProvidersResponseSchema,
+  GetProvidersSnapshotResponseMessageSchema,
+  ProvidersSnapshotUpdateMessageSchema,
+  RefreshProvidersSnapshotResponseMessageSchema,
+  ProviderDiagnosticResponseMessageSchema,
   ListCommandsResponseSchema,
   ListTerminalsResponseSchema,
   TerminalsChangedSchema,
@@ -2568,6 +2646,16 @@ export type ListProviderFeaturesResponseMessage = z.infer<
   typeof ListProviderFeaturesResponseMessageSchema
 >;
 export type ListAvailableProvidersResponse = z.infer<typeof ListAvailableProvidersResponseSchema>;
+export type GetProvidersSnapshotResponseMessage = z.infer<
+  typeof GetProvidersSnapshotResponseMessageSchema
+>;
+export type ProvidersSnapshotUpdateMessage = z.infer<typeof ProvidersSnapshotUpdateMessageSchema>;
+export type RefreshProvidersSnapshotResponseMessage = z.infer<
+  typeof RefreshProvidersSnapshotResponseMessageSchema
+>;
+export type ProviderDiagnosticResponseMessage = z.infer<
+  typeof ProviderDiagnosticResponseMessageSchema
+>;
 export type ChatCreateResponse = z.infer<typeof ChatCreateResponseSchema>;
 export type ChatListResponse = z.infer<typeof ChatListResponseSchema>;
 export type ChatInspectResponse = z.infer<typeof ChatInspectResponseSchema>;
@@ -2614,6 +2702,15 @@ export type ListProviderFeaturesRequestMessage = z.infer<
 >;
 export type ListAvailableProvidersRequestMessage = z.infer<
   typeof ListAvailableProvidersRequestMessageSchema
+>;
+export type GetProvidersSnapshotRequestMessage = z.infer<
+  typeof GetProvidersSnapshotRequestMessageSchema
+>;
+export type RefreshProvidersSnapshotRequestMessage = z.infer<
+  typeof RefreshProvidersSnapshotRequestMessageSchema
+>;
+export type ProviderDiagnosticRequestMessage = z.infer<
+  typeof ProviderDiagnosticRequestMessageSchema
 >;
 export type ChatCreateRequest = z.infer<typeof ChatCreateRequestSchema>;
 export type ChatListRequest = z.infer<typeof ChatListRequestSchema>;
