@@ -34,6 +34,7 @@ import invariant from "tiny-invariant";
 import { SidebarMenuToggle } from "@/components/headers/menu-header";
 import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
 import { ScreenHeader } from "@/components/headers/screen-header";
+import { BranchSwitcher } from "@/components/branch-switcher";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Shortcut } from "@/components/ui/shortcut";
 import {
@@ -80,6 +81,7 @@ import type { ListTerminalsResponse } from "@server/shared/messages";
 import { upsertTerminalListEntry } from "@/utils/terminal-list";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import { useBranchSwitcher } from "@/hooks/use-branch-switcher";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { buildProviderCommand } from "@/utils/provider-command-templates";
 import { generateDraftId } from "@/stores/draft-keys";
@@ -759,6 +761,24 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
     checkoutQuery.data?.isGit && checkoutQuery.data.currentBranch !== "HEAD"
       ? trimNonEmpty(checkoutQuery.data.currentBranch)
       : null;
+
+  const {
+    branchOptions,
+    isOpen: isBranchSwitcherOpen,
+    setIsOpen: setIsBranchSwitcherOpen,
+    handleBranchSelect,
+    invalidateStashAndCheckout,
+  } = useBranchSwitcher({
+    client,
+    normalizedServerId,
+    normalizedWorkspaceId,
+    currentBranchName,
+    isGitCheckout,
+    isConnected,
+    toast,
+    queryClient,
+  });
+
   const mobileView = usePanelStore((state) => state.mobileView);
   const desktopFileExplorerOpen = usePanelStore((state) => state.desktop.fileExplorerOpen);
   const toggleFileExplorer = usePanelStore((state) => state.toggleFileExplorer);
@@ -1948,13 +1968,14 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
                     </>
                   ) : (
                     <>
-                      <Text
-                        testID="workspace-header-title"
-                        style={styles.headerTitle}
-                        numberOfLines={1}
-                      >
-                        {workspaceHeader.title}
-                      </Text>
+                      <BranchSwitcher
+                        currentBranchName={currentBranchName}
+                        title={workspaceHeader.title}
+                        branchOptions={branchOptions}
+                        isOpen={isBranchSwitcherOpen}
+                        onOpenChange={setIsBranchSwitcherOpen}
+                        onBranchSelect={handleBranchSelect}
+                      />
                       <Text
                         testID="workspace-header-subtitle"
                         style={styles.headerProjectTitle}
