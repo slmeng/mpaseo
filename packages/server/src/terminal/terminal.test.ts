@@ -125,7 +125,9 @@ describe("Terminal", () => {
 
     it("humanizes interpreter-backed package manager commands", () => {
       expect(
-        humanizeProcessTitle("/usr/local/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js run dev"),
+        humanizeProcessTitle(
+          "/usr/local/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js run dev",
+        ),
       ).toBe("npm run dev");
       expect(
         humanizeProcessTitle("/usr/bin/env FOO=bar /opt/homebrew/bin/node /tmp/npm-cli.js test"),
@@ -361,7 +363,7 @@ describe("Terminal", () => {
         await createTerminal({
           cwd: homeDir,
           command: "/bin/zsh",
-          args: ["-c", "printf '%s\\n%s\\n' \"${ZDOTDIR-}\" \"${PASEO_TEST_REAL_ZDOTDIR-}\""],
+          args: ["-c", 'printf \'%s\\n%s\\n\' "${ZDOTDIR-}" "${PASEO_TEST_REAL_ZDOTDIR-}"'],
           env: {
             HOME: homeDir,
             ZDOTDIR: realZdotdir,
@@ -453,8 +455,7 @@ describe("Terminal", () => {
       await waitForLines(session, ["$"]);
       session.send({
         type: "input",
-        data:
-          "printf '\\033]0;First\\007\\033]0;Second\\007\\033]0;Final\\007'\r",
+        data: "printf '\\033]0;First\\007\\033]0;Second\\007\\033]0;Final\\007'\r",
       });
 
       await waitForTitle(session, (title) => title === "Final");

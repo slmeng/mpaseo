@@ -19,10 +19,7 @@ type RouteHealthState = {
 
 export class ScriptHealthMonitor {
   private readonly routeStore: ScriptRouteStore;
-  private readonly onChange: (
-    workspaceId: string,
-    scripts: ScriptHealthEntry[],
-  ) => void;
+  private readonly onChange: (workspaceId: string, scripts: ScriptHealthEntry[]) => void;
   private readonly pollIntervalMs: number;
   private readonly probeTimeoutMs: number;
   private readonly graceMs: number;
@@ -172,15 +169,13 @@ export class ScriptHealthMonitor {
   }
 
   private buildWorkspaceScriptList(workspaceId: string): ScriptHealthEntry[] {
-    return this.routeStore
-      .listRoutesForWorkspace(workspaceId)
-      .flatMap((route) => {
-        const state = this.routeStates.get(route.hostname);
-        if (!state) {
-          return [];
-        }
-        return [this.toScriptHealthEntry(route, state.health)];
-      });
+    return this.routeStore.listRoutesForWorkspace(workspaceId).flatMap((route) => {
+      const state = this.routeStates.get(route.hostname);
+      if (!state) {
+        return [];
+      }
+      return [this.toScriptHealthEntry(route, state.health)];
+    });
   }
 
   getHealthForHostname(hostname: string): ScriptHealthState | null {

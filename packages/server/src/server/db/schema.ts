@@ -1,6 +1,10 @@
 import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-import type { AgentPersistenceHandle, AgentRuntimeInfo, AgentTimelineItem } from "../agent/agent-sdk-types.js";
+import type {
+  AgentPersistenceHandle,
+  AgentRuntimeInfo,
+  AgentTimelineItem,
+} from "../agent/agent-sdk-types.js";
 import type { StoredAgentRecord } from "../agent/agent-storage.js";
 
 export const projects = sqliteTable("projects", {
@@ -65,9 +69,7 @@ export const agentTimelineRows = sqliteTable(
     item: text("item", { mode: "json" }).$type<AgentTimelineItem>().notNull(),
     itemKind: text("item_kind"),
   },
-  (table) => [
-    primaryKey({ columns: [table.agentId, table.seq], name: "agent_timeline_rows_pk" }),
-  ],
+  (table) => [primaryKey({ columns: [table.agentId, table.seq], name: "agent_timeline_rows_pk" })],
 );
 
 export const paseoDbSchema = {

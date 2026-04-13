@@ -8,12 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { AgentTimelineItem } from "../agent/agent-sdk-types.js";
 import { openPaseoDatabase } from "./sqlite-database.js";
 import { runPaseoDbMigrations } from "./migrations.js";
-import {
-  agentSnapshots,
-  agentTimelineRows,
-  projects,
-  workspaces,
-} from "./schema.js";
+import { agentSnapshots, agentTimelineRows, projects, workspaces } from "./schema.js";
 
 function createTimestamp(day: number): string {
   return `2026-03-${String(day).padStart(2, "0")}T00:00:00.000Z`;
@@ -45,15 +40,18 @@ describe("SQLite database contract", () => {
   test("creates, migrates, closes, and reopens a persistent database", async () => {
     const database = await openPaseoDatabase(dataDir);
 
-    const [project] = await database.db.insert(projects).values({
-      directory: "/tmp/project-1",
-      kind: "git",
-      displayName: "Project One",
-      gitRemote: "git@github.com:acme/project-1.git",
-      createdAt: createTimestamp(1),
-      updatedAt: createTimestamp(1),
-      archivedAt: null,
-    }).returning();
+    const [project] = await database.db
+      .insert(projects)
+      .values({
+        directory: "/tmp/project-1",
+        kind: "git",
+        displayName: "Project One",
+        gitRemote: "git@github.com:acme/project-1.git",
+        createdAt: createTimestamp(1),
+        updatedAt: createTimestamp(1),
+        archivedAt: null,
+      })
+      .returning();
 
     await database.close();
 
@@ -77,24 +75,30 @@ describe("SQLite database contract", () => {
   test("supports project and workspace linkage plus archive field updates", async () => {
     const database = await openPaseoDatabase(dataDir);
 
-    const [project] = await database.db.insert(projects).values({
-      directory: "/tmp/project-1",
-      kind: "git",
-      displayName: "Project One",
-      gitRemote: null,
-      createdAt: createTimestamp(1),
-      updatedAt: createTimestamp(1),
-      archivedAt: null,
-    }).returning();
-    const [workspace] = await database.db.insert(workspaces).values({
-      projectId: project.id,
-      directory: "/tmp/project-1",
-      kind: "checkout",
-      displayName: "main",
-      createdAt: createTimestamp(1),
-      updatedAt: createTimestamp(1),
-      archivedAt: null,
-    }).returning();
+    const [project] = await database.db
+      .insert(projects)
+      .values({
+        directory: "/tmp/project-1",
+        kind: "git",
+        displayName: "Project One",
+        gitRemote: null,
+        createdAt: createTimestamp(1),
+        updatedAt: createTimestamp(1),
+        archivedAt: null,
+      })
+      .returning();
+    const [workspace] = await database.db
+      .insert(workspaces)
+      .values({
+        projectId: project.id,
+        directory: "/tmp/project-1",
+        kind: "checkout",
+        displayName: "main",
+        createdAt: createTimestamp(1),
+        updatedAt: createTimestamp(1),
+        archivedAt: null,
+      })
+      .returning();
 
     await database.db
       .update(workspaces)
@@ -123,24 +127,30 @@ describe("SQLite database contract", () => {
 
   test("supports snapshot insert, get, update, and project-delete cascade with integer workspace IDs", async () => {
     const database = await openPaseoDatabase(dataDir);
-    const [project] = await database.db.insert(projects).values({
-      directory: "/tmp/project-1",
-      kind: "git",
-      displayName: "Project One",
-      gitRemote: null,
-      createdAt: createTimestamp(1),
-      updatedAt: createTimestamp(1),
-      archivedAt: null,
-    }).returning();
-    const [workspace] = await database.db.insert(workspaces).values({
-      projectId: project.id,
-      directory: "/tmp/project-1",
-      kind: "checkout",
-      displayName: "main",
-      createdAt: createTimestamp(1),
-      updatedAt: createTimestamp(1),
-      archivedAt: null,
-    }).returning();
+    const [project] = await database.db
+      .insert(projects)
+      .values({
+        directory: "/tmp/project-1",
+        kind: "git",
+        displayName: "Project One",
+        gitRemote: null,
+        createdAt: createTimestamp(1),
+        updatedAt: createTimestamp(1),
+        archivedAt: null,
+      })
+      .returning();
+    const [workspace] = await database.db
+      .insert(workspaces)
+      .values({
+        projectId: project.id,
+        directory: "/tmp/project-1",
+        kind: "checkout",
+        displayName: "main",
+        createdAt: createTimestamp(1),
+        updatedAt: createTimestamp(1),
+        archivedAt: null,
+      })
+      .returning();
 
     await database.db.insert(agentSnapshots).values({
       agentId: "agent-1",

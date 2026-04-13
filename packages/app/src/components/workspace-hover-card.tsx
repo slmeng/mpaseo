@@ -289,10 +289,7 @@ function WorkspaceHoverCardContent({
             <>
               <View style={styles.separator} />
               <Pressable
-                style={({ hovered }) => [
-                  styles.checksSummaryRow,
-                  hovered && styles.listRowHovered,
-                ]}
+                style={({ hovered }) => [styles.checksSummaryRow, hovered && styles.listRowHovered]}
                 onPress={() => void openExternalUrl(`${prHint.url}/checks`)}
               >
                 {({ hovered }) => {
@@ -333,10 +330,7 @@ function WorkspaceHoverCardContent({
                             },
                           ]}
                         >
-                          <ExternalLink
-                            size={12}
-                            color={theme.colors.foreground}
-                          />
+                          <ExternalLink size={12} color={theme.colors.foreground} />
                         </View>
                       ) : null}
                     </>

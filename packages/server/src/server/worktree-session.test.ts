@@ -1,5 +1,12 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -42,38 +49,36 @@ function createTerminalManagerStub(options?: {
     terminals,
     manager: {
       registerCwdEnv: vi.fn(),
-      createTerminal: vi.fn(async (input: {
-        cwd: string;
-        name?: string;
-        env?: Record<string, string>;
-      }) => {
-        if (options?.createTerminal) {
-          return options.createTerminal(input);
-        }
-        const sent: string[] = [];
-        const terminal = {
-          id: `terminal-${terminals.length + 1}`,
-          getState: () => ({
-            scrollback: [[{ char: "$" }]],
-            grid: [],
-          }),
-          subscribe: () => () => {},
-          onExit: () => () => {},
-          send: (message: { type: string; data: string }) => {
-            if (message.type === "input") {
-              sent.push(message.data);
-            }
-          },
-        };
-        terminals.push({
-          id: terminal.id,
-          cwd: input.cwd,
-          name: input.name,
-          env: input.env,
-          sent,
-        });
-        return terminal;
-      }),
+      createTerminal: vi.fn(
+        async (input: { cwd: string; name?: string; env?: Record<string, string> }) => {
+          if (options?.createTerminal) {
+            return options.createTerminal(input);
+          }
+          const sent: string[] = [];
+          const terminal = {
+            id: `terminal-${terminals.length + 1}`,
+            getState: () => ({
+              scrollback: [[{ char: "$" }]],
+              grid: [],
+            }),
+            subscribe: () => () => {},
+            onExit: () => () => {},
+            send: (message: { type: string; data: string }) => {
+              if (message.type === "input") {
+                sent.push(message.data);
+              }
+            },
+          };
+          terminals.push({
+            id: terminal.id,
+            cwd: input.cwd,
+            name: input.name,
+            env: input.env,
+            sent,
+          });
+          return terminal;
+        },
+      ),
     } as any,
   };
 }
@@ -114,9 +119,12 @@ function createGitHubPrRemoteRepo() {
   execSync(`git clone --bare ${JSON.stringify(repoDir)} ${JSON.stringify(remoteDir)}`, {
     stdio: "pipe",
   });
-  execSync(`git --git-dir=${JSON.stringify(remoteDir)} update-ref refs/pull/123/head ${featureSha}`, {
-    stdio: "pipe",
-  });
+  execSync(
+    `git --git-dir=${JSON.stringify(remoteDir)} update-ref refs/pull/123/head ${featureSha}`,
+    {
+      stdio: "pipe",
+    },
+  );
   execSync(`git remote add origin ${JSON.stringify(remoteDir)}`, { cwd: repoDir, stdio: "pipe" });
   execSync("git fetch origin", { cwd: repoDir, stdio: "pipe" });
 
@@ -165,7 +173,8 @@ describe("createPaseoWorktreeInBackground", () => {
       {
         paseoHome,
         emitWorkspaceUpdateForCwd,
-        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) => snapshots.set(workspaceId, snapshot),
+        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) =>
+          snapshots.set(workspaceId, snapshot),
         emit: (message) => emitted.push(message),
         sessionLogger: logger,
         terminalManager: terminalManager.manager,
@@ -261,7 +270,8 @@ describe("createPaseoWorktreeInBackground", () => {
       {
         paseoHome,
         emitWorkspaceUpdateForCwd,
-        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) => snapshots.set(workspaceId, snapshot),
+        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) =>
+          snapshots.set(workspaceId, snapshot),
         emit: (message) => emitted.push(message),
         sessionLogger: logger,
         terminalManager: null,
@@ -301,7 +311,7 @@ describe("createPaseoWorktreeInBackground", () => {
     const { tempDir, repoDir } = createGitRepo({
       paseoConfig: {
         worktree: {
-          setup: ['sh -c "printf \'phase-one\\\\n\'; sleep 0.1; printf \'phase-two\\\\n\'"'],
+          setup: ["sh -c \"printf 'phase-one\\\\n'; sleep 0.1; printf 'phase-two\\\\n'\""],
         },
       },
     });
@@ -327,7 +337,8 @@ describe("createPaseoWorktreeInBackground", () => {
       {
         paseoHome,
         emitWorkspaceUpdateForCwd,
-        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) => snapshots.set(workspaceId, snapshot),
+        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) =>
+          snapshots.set(workspaceId, snapshot),
         emit: (message) => emitted.push(message),
         sessionLogger: logger,
         terminalManager: null,
@@ -364,11 +375,13 @@ describe("createPaseoWorktreeInBackground", () => {
     });
     expect(progressMessages.at(-1)?.payload.status).toBe("completed");
 
-    const runningMessages = progressMessages.filter((message) => message.payload.status === "running");
-    expect(runningMessages.length).toBeGreaterThan(0);
-    expect(progressMessages.findIndex((message) => message.payload.status === "running")).toBeLessThan(
-      progressMessages.findIndex((message) => message.payload.status === "completed"),
+    const runningMessages = progressMessages.filter(
+      (message) => message.payload.status === "running",
     );
+    expect(runningMessages.length).toBeGreaterThan(0);
+    expect(
+      progressMessages.findIndex((message) => message.payload.status === "running"),
+    ).toBeLessThan(progressMessages.findIndex((message) => message.payload.status === "completed"));
 
     const setupOutputMessage = runningMessages.find((message) =>
       message.payload.detail.commands[0]?.log.includes("phase-one"),
@@ -376,7 +389,7 @@ describe("createPaseoWorktreeInBackground", () => {
     expect(setupOutputMessage?.payload.detail.log).toContain("phase-one");
     expect(setupOutputMessage?.payload.detail.commands[0]).toMatchObject({
       index: 1,
-      command: 'sh -c "printf \'phase-one\\\\n\'; sleep 0.1; printf \'phase-two\\\\n\'"',
+      command: "sh -c \"printf 'phase-one\\\\n'; sleep 0.1; printf 'phase-two\\\\n'\"",
       log: expect.stringContaining("phase-one"),
       status: "running",
     });
@@ -394,7 +407,7 @@ describe("createPaseoWorktreeInBackground", () => {
     expect(progressMessages.at(-1)?.payload.detail.log).toContain("phase-two");
     expect(progressMessages.at(-1)?.payload.detail.commands[0]).toMatchObject({
       index: 1,
-      command: 'sh -c "printf \'phase-one\\\\n\'; sleep 0.1; printf \'phase-two\\\\n\'"',
+      command: "sh -c \"printf 'phase-one\\\\n'; sleep 0.1; printf 'phase-two\\\\n'\"",
       log: expect.stringContaining("phase-two"),
       status: "completed",
       exitCode: 0,
@@ -441,7 +454,8 @@ describe("createPaseoWorktreeInBackground", () => {
       {
         paseoHome,
         emitWorkspaceUpdateForCwd,
-        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) => snapshots.set(workspaceId, snapshot),
+        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) =>
+          snapshots.set(workspaceId, snapshot),
         emit: (message) => emitted.push(message),
         sessionLogger: logger,
         terminalManager: terminalManager.manager,
@@ -482,10 +496,12 @@ describe("createPaseoWorktreeInBackground", () => {
       },
     });
     expect(terminalManager.terminals).toHaveLength(0);
-    expect(
-      readFileSync(path.join(existingWorktree.worktreePath, "README.md"), "utf8"),
-    ).toContain("hello");
-    expect(() => readFileSync(path.join(existingWorktree.worktreePath, "setup-ran.txt"), "utf8")).toThrow();
+    expect(readFileSync(path.join(existingWorktree.worktreePath, "README.md"), "utf8")).toContain(
+      "hello",
+    );
+    expect(() =>
+      readFileSync(path.join(existingWorktree.worktreePath, "setup-ran.txt"), "utf8"),
+    ).toThrow();
     expect(snapshots.get("44")).toMatchObject({
       status: "completed",
       error: null,
@@ -531,7 +547,8 @@ describe("createPaseoWorktreeInBackground", () => {
       {
         paseoHome,
         emitWorkspaceUpdateForCwd,
-        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) => snapshots.set(workspaceId, snapshot),
+        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) =>
+          snapshots.set(workspaceId, snapshot),
         emit: (message) => emitted.push(message),
         sessionLogger: logger,
         terminalManager: terminalManager.manager,
@@ -610,7 +627,8 @@ describe("createPaseoWorktreeInBackground", () => {
       {
         paseoHome,
         emitWorkspaceUpdateForCwd,
-        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) => snapshots.set(workspaceId, snapshot),
+        cacheWorkspaceSetupSnapshot: (workspaceId, snapshot) =>
+          snapshots.set(workspaceId, snapshot),
         emit: (message) => emitted.push(message),
         sessionLogger: logger,
         terminalManager: terminalManager.manager,
@@ -714,7 +732,6 @@ describe("createPaseoWorktreeInBackground", () => {
       },
     });
   });
-
 });
 
 describe("handleCreatePaseoWorktreeRequest", () => {
@@ -787,7 +804,9 @@ describe("handleCreatePaseoWorktreeRequest", () => {
     );
 
     const response = emitted.find(
-      (message): message is Extract<SessionOutboundMessage, { type: "create_paseo_worktree_response" }> =>
+      (
+        message,
+      ): message is Extract<SessionOutboundMessage, { type: "create_paseo_worktree_response" }> =>
         message.type === "create_paseo_worktree_response",
     );
 
@@ -899,7 +918,9 @@ describe("handleCreatePaseoWorktreeRequest", () => {
 
       expect(createAgentWorktreeSpy).toHaveBeenCalledTimes(1);
       const response = emitted.find(
-        (message): message is Extract<SessionOutboundMessage, { type: "create_paseo_worktree_response" }> =>
+        (
+          message,
+        ): message is Extract<SessionOutboundMessage, { type: "create_paseo_worktree_response" }> =>
           message.type === "create_paseo_worktree_response",
       );
       expect(response?.payload.error).toBeNull();
@@ -950,7 +971,9 @@ describe("handleCreatePaseoWorktreeRequest", () => {
       );
 
       const response = emitted.find(
-        (message): message is Extract<SessionOutboundMessage, { type: "create_paseo_worktree_response" }> =>
+        (
+          message,
+        ): message is Extract<SessionOutboundMessage, { type: "create_paseo_worktree_response" }> =>
           message.type === "create_paseo_worktree_response",
       );
       expect(response?.payload.error).toBeNull();

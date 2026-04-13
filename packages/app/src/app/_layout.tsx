@@ -83,6 +83,7 @@ import {
   decodeWorkspaceIdFromPathSegment,
 } from "@/utils/host-routes";
 import { syncNavigationActiveWorkspace } from "@/stores/navigation-active-workspace-store";
+import { isWeb, isNative } from "@/constants/platform";
 
 polyfillCrypto();
 
@@ -91,6 +92,22 @@ export type HostRuntimeBootstrapState = {
   error: string | null;
   retry: () => void;
 };
+
+function getRouteParamValue(value: string | string[] | undefined): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (Array.isArray(value)) {
+    const firstValue = value[0];
+    if (typeof firstValue !== "string") {
+      return undefined;
+    }
+    const trimmed = firstValue.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return undefined;
+}
 
 const HostRuntimeBootstrapContext = createContext<HostRuntimeBootstrapState>({
   phase: "starting-daemon",
@@ -103,7 +120,7 @@ function PushNotificationRouter() {
   const lastHandledIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (Platform.OS === "web") {
+    if (isWeb) {
       let removeDesktopNotificationListener: (() => void) | null = null;
       let cancelled = false;
 
@@ -392,10 +409,10 @@ function AppContainer({
     const screenW = UnistylesRuntime.screen.width;
     const screenH = UnistylesRuntime.screen.height;
     const isElectron = getIsElectronRuntime();
-    const windowW = Platform.OS === "web" ? window.innerWidth : undefined;
-    const windowH = Platform.OS === "web" ? window.innerHeight : undefined;
-    const dpr = Platform.OS === "web" ? window.devicePixelRatio : undefined;
-    const ua = Platform.OS === "web" ? navigator.userAgent : undefined;
+    const windowW = isWeb ? window.innerWidth : undefined;
+    const windowH = isWeb ? window.innerHeight : undefined;
+    const dpr = isWeb ? window.devicePixelRatio : undefined;
+    const ua = isWeb ? navigator.userAgent : undefined;
 
     console.log(
       "[layout-debug]",
@@ -580,7 +597,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
   }, [settingsLoading, settings.theme]);
 
   useEffect(() => {
-    if (settingsLoading || Platform.OS !== "web") {
+    if (settingsLoading || isNative) {
       return;
     }
 
@@ -789,7 +806,14 @@ function RootStack() {
         <Stack.Screen name="settings" />
         <Stack.Screen name="pair-scan" />
       </Stack.Protected>
-      <Stack.Screen name="h/[serverId]/workspace/[workspaceId]" />
+      <Stack.Screen
+        name="h/[serverId]/workspace/[workspaceId]"
+        getId={({ params }) => {
+          const serverId = getRouteParamValue(params?.serverId);
+          const workspaceId = getRouteParamValue(params?.workspaceId);
+          return serverId && workspaceId ? `${serverId}:${workspaceId}` : undefined;
+        }}
+      />
       <Stack.Screen name="h/[serverId]/agent/[agentId]" options={{ gestureEnabled: false }} />
       <Stack.Screen name="h/[serverId]/index" />
       <Stack.Screen name="h/[serverId]/sessions" />

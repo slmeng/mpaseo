@@ -2,14 +2,8 @@ import { execSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./fixtures";
-import {
-  clickTerminal,
-  waitForTabBar,
-} from "./helpers/launcher";
-import {
-  setupDeterministicPrompt,
-  waitForTerminalContent,
-} from "./helpers/terminal-perf";
+import { clickTerminal, waitForTabBar } from "./helpers/launcher";
+import { setupDeterministicPrompt, waitForTerminalContent } from "./helpers/terminal-perf";
 import { createTempGitRepo } from "./helpers/workspace";
 import {
   connectWorkspaceSetupClient,
@@ -88,10 +82,13 @@ test.describe("Workspace cwd correctness", () => {
     try {
       await seedProjectForWorkspaceSetup(client, repo.path);
 
-      execSync(`git worktree add ${JSON.stringify(worktreePath)} -b ${JSON.stringify(branchName)} main`, {
-        cwd: repo.path,
-        stdio: "ignore",
-      });
+      execSync(
+        `git worktree add ${JSON.stringify(worktreePath)} -b ${JSON.stringify(branchName)} main`,
+        {
+          cwd: repo.path,
+          stdio: "ignore",
+        },
+      );
       worktreeCreated = true;
 
       const workspaceResult = await client.openProject(worktreePath);
@@ -132,5 +129,4 @@ test.describe("Workspace cwd correctness", () => {
       await repo.cleanup();
     }
   });
-
 });

@@ -39,7 +39,9 @@ function useTerminalPanelDescriptor(
     queryFn: async (): Promise<ListTerminalsPayload> => {
       if (!client || !workspaceDirectory) {
         throw new Error(
-          workspaceAuthority.ok ? "Workspace execution directory not found" : workspaceAuthority.message,
+          workspaceAuthority.ok
+            ? "Workspace execution directory not found"
+            : workspaceAuthority.message,
         );
       }
       return client.listTerminals(workspaceDirectory);
@@ -76,7 +78,9 @@ function TerminalPanel() {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
         <Text>
-          {workspaceAuthority.ok ? "Workspace execution directory not found." : workspaceAuthority.message}
+          {workspaceAuthority.ok
+            ? "Workspace execution directory not found."
+            : workspaceAuthority.message}
         </Text>
       </View>
     );

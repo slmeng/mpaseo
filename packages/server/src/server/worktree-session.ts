@@ -1,4 +1,4 @@
-import { exec, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Logger } from "pino";
 import { v4 as uuidv4 } from "uuid";
@@ -48,9 +48,9 @@ import {
   WorktreeSetupError,
 } from "../utils/worktree.js";
 import { writePaseoWorktreeMetadata } from "../utils/worktree-metadata.js";
+import { runGitCommand } from "../utils/run-git-command.js";
 import { READ_ONLY_GIT_ENV, toCheckoutError } from "./checkout-git-utils.js";
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const SAFE_GIT_REF_PATTERN = /^[A-Za-z0-9._\/-]+$/;
 
@@ -90,20 +90,14 @@ type RegisterPendingWorktreeWorkspaceDependencies = {
   buildProjectPlacement: (cwd: string) => Promise<ProjectPlacementPayload>;
   findWorkspaceByDirectory: (directory: string) => Promise<PersistedWorkspaceRecord | null>;
   projectRegistry: Pick<ProjectRegistry, "get" | "upsert" | "insert" | "archive">;
-  syncWorkspaceGitWatchTarget: (
-    cwd: string,
-    options: { isGit: boolean },
-  ) => Promise<void>;
+  syncWorkspaceGitWatchTarget: (cwd: string, options: { isGit: boolean }) => Promise<void>;
   workspaceRegistry: Pick<WorkspaceRegistry, "get" | "upsert" | "insert" | "list">;
   archiveProjectRecordIfEmpty: (projectId: number, archivedAt: string) => Promise<void>;
 };
 
 type CreatePaseoWorktreeInBackgroundDependencies = {
   paseoHome?: string;
-  emitWorkspaceUpdateForCwd: (
-    cwd: string,
-    options?: { dedupeGitState?: boolean },
-  ) => Promise<void>;
+  emitWorkspaceUpdateForCwd: (cwd: string, options?: { dedupeGitState?: boolean }) => Promise<void>;
   cacheWorkspaceSetupSnapshot: (workspaceId: string, snapshot: WorkspaceSetupSnapshot) => void;
   emit: EmitSessionMessage;
   sessionLogger: Logger;
@@ -129,12 +123,14 @@ type HandleCreatePaseoWorktreeRequestDependencies = {
     branchName: string;
   }) => Promise<PersistedWorkspaceRecord>;
   sessionLogger: Logger;
-  createPaseoWorktreeInBackground: (options: {
+  runWorktreeSetupInBackground: (options: {
     requestCwd: string;
     repoRoot: string;
     workspaceId: number;
     worktree: WorktreeConfig;
     shouldBootstrap: boolean;
+    slug: string;
+    worktreePath: string;
   }) => Promise<void>;
 };
 
@@ -175,7 +171,8 @@ export async function buildAgentSessionConfig(
         githubPrAttachment.baseRefName?.trim() ||
         normalized.baseBranch ||
         (await resolveGitCreateBaseBranch(cwd, dependencies.paseoHome));
-      const worktreeSlug = normalized.worktreeSlug ?? slugify(resolveGitHubPrBranchName(githubPrAttachment));
+      const worktreeSlug =
+        normalized.worktreeSlug ?? slugify(resolveGitHubPrBranchName(githubPrAttachment));
       const createdWorktree = await createGitHubPrWorktree({
         cwd,
         branchName: resolveGitHubPrBranchName(githubPrAttachment),
@@ -203,7 +200,7 @@ export async function buildAgentSessionConfig(
     if (normalized.createNewBranch) {
       targetBranch = normalized.newBranchName!;
     } else {
-      const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD", {
+      const { stdout } = await runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd,
         env: READ_ONLY_GIT_ENV,
       });
@@ -690,6 +687,15 @@ export async function handleCreatePaseoWorktreeRequest(
       worktreePath: createdWorktree.worktree.worktreePath,
       branchName: createdWorktree.worktree.branchName,
     });
+
+    await createAgentWorktree({
+      cwd: repoRoot,
+      branchName: normalizedSlug,
+      baseBranch,
+      worktreeSlug: normalizedSlug,
+      paseoHome: dependencies.paseoHome,
+    });
+
     const descriptor = await dependencies.describeWorkspaceRecord(workspace);
     dependencies.emit({
       type: "create_paseo_worktree_response",
@@ -701,12 +707,14 @@ export async function handleCreatePaseoWorktreeRequest(
       },
     });
 
-    void dependencies.createPaseoWorktreeInBackground({
+    void dependencies.runWorktreeSetupInBackground({
       requestCwd: request.cwd,
       repoRoot,
       workspaceId: workspace.id,
       worktree: createdWorktree.worktree,
       shouldBootstrap: createdWorktree.shouldBootstrap,
+      slug: normalizedSlug,
+      worktreePath: createdWorktree.worktree.worktreePath,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to create worktree";
@@ -752,7 +760,7 @@ export async function handleWorkspaceSetupStatusRequest(
   });
 }
 
-export async function createPaseoWorktreeInBackground(
+export async function runWorktreeSetupInBackground(
   dependencies: CreatePaseoWorktreeInBackgroundDependencies,
   options: {
     requestCwd: string;
@@ -760,6 +768,8 @@ export async function createPaseoWorktreeInBackground(
     workspaceId: number;
     worktree: WorktreeConfig;
     shouldBootstrap: boolean;
+    slug: string;
+    worktreePath: string;
   },
 ): Promise<void> {
   let worktree: WorktreeConfig = options.worktree;
@@ -774,7 +784,9 @@ export async function createPaseoWorktreeInBackground(
       detail: buildWorktreeSetupDetail({
         worktree,
         results:
-          status === "running" ? getWorktreeSetupProgressResults(progressAccumulator) : setupResults,
+          status === "running"
+            ? getWorktreeSetupProgressResults(progressAccumulator)
+            : setupResults,
         outputAccumulatorsByIndex: progressAccumulator.outputAccumulatorsByIndex,
       }),
       error,
@@ -849,7 +861,6 @@ export async function createPaseoWorktreeInBackground(
       );
       return;
     }
-
   } finally {
     await dependencies.emitWorkspaceUpdateForCwd(worktree.worktreePath);
   }

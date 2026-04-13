@@ -62,7 +62,9 @@ export async function importLegacyProjectWorkspaceJson(options: {
   const databaseHasRows = await hasAnyProjectWorkspaceRows(options.db);
 
   if (databaseHasRows) {
-    options.logger.info("Skipping legacy project/workspace JSON import because the DB is not empty");
+    options.logger.info(
+      "Skipping legacy project/workspace JSON import because the DB is not empty",
+    );
     return {
       status: "skipped",
       reason: "database-not-empty",
@@ -74,7 +76,9 @@ export async function importLegacyProjectWorkspaceJson(options: {
     pathExists(workspacesPath),
   ]);
   if (!projectsExists && !workspacesExists) {
-    options.logger.info("Skipping legacy project/workspace JSON import because no legacy files exist");
+    options.logger.info(
+      "Skipping legacy project/workspace JSON import because no legacy files exist",
+    );
     return {
       status: "skipped",
       reason: "no-legacy-files",
@@ -94,7 +98,9 @@ export async function importLegacyProjectWorkspaceJson(options: {
   ]);
 
   if (projectRows.length === 0 && workspaceRows.length === 0) {
-    options.logger.info("Skipping legacy project/workspace JSON import because no legacy files exist");
+    options.logger.info(
+      "Skipping legacy project/workspace JSON import because no legacy files exist",
+    );
     return {
       status: "skipped",
       reason: "no-legacy-files",
@@ -144,10 +150,11 @@ export async function importLegacyProjectWorkspaceJson(options: {
     for (const legacy of workspaceRows) {
       const projectId = legacyProjectIdToNewId.get(legacy.projectId);
       if (projectId === undefined) {
-        throw new Error(`Legacy workspace ${legacy.workspaceId} references unknown project ${legacy.projectId}`);
+        throw new Error(
+          `Legacy workspace ${legacy.workspaceId} references unknown project ${legacy.projectId}`,
+        );
       }
-      tx
-        .insert(workspaces)
+      tx.insert(workspaces)
         .values({
           projectId,
           directory: legacy.cwd,
@@ -252,7 +259,10 @@ async function backupLegacyProjectWorkspaceJson(options: {
     await fs.copyFile(options.workspacesPath, path.join(backupDir, "workspaces.json"));
   }
 
-  options.logger.info({ backupPath: backupDir }, "Backed up legacy project/workspace JSON before migration");
+  options.logger.info(
+    { backupPath: backupDir },
+    "Backed up legacy project/workspace JSON before migration",
+  );
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {

@@ -2,7 +2,11 @@ import { useCallback } from "react";
 import { router } from "expo-router";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { normalizeWorkspaceDescriptor, type WorkspaceDescriptor, useSessionStore } from "@/stores/session-store";
+import {
+  normalizeWorkspaceDescriptor,
+  type WorkspaceDescriptor,
+  useSessionStore,
+} from "@/stores/session-store";
 import {
   buildWorkspaceTabPersistenceKey,
   useWorkspaceLayoutStore,

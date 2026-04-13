@@ -80,9 +80,7 @@ describe("workspace route parsing", () => {
 
   it("parses workspace open intent from pathname query", () => {
     expect(
-      parseHostWorkspaceOpenIntentFromPathname(
-        "/h/local/workspace/164?open=agent%3Aagent-1",
-      ),
+      parseHostWorkspaceOpenIntentFromPathname("/h/local/workspace/164?open=agent%3Aagent-1"),
     ).toEqual({
       kind: "agent",
       agentId: "agent-1",

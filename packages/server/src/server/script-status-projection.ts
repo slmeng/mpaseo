@@ -109,7 +109,7 @@ export function buildWorkspaceScriptPayloads(
       type,
       branchName,
       daemonPort: options.daemonPort,
-      configuredPort: isServiceScript(config) ? config.port ?? null : null,
+      configuredPort: isServiceScript(config) ? (config.port ?? null) : null,
     });
 
     payloads.push({

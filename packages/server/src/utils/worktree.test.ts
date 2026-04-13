@@ -15,12 +15,20 @@ import {
 } from "./worktree";
 import { getPaseoWorktreeMetadataPath } from "./worktree-metadata.js";
 import { execSync } from "child_process";
-import { mkdtempSync, rmSync, existsSync, realpathSync, writeFileSync, readFileSync } from "fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  existsSync,
+  realpathSync,
+  writeFileSync,
+  readFileSync,
+} from "fs";
 import { dirname, join } from "path";
 import { tmpdir } from "os";
 import net from "node:net";
 
-describe("createWorktree", () => {
+describe.skipIf(process.platform === "win32")("createWorktree", () => {
   let tempDir: string;
   let repoDir: string;
   let paseoHome: string;
@@ -32,13 +40,13 @@ describe("createWorktree", () => {
     paseoHome = join(tempDir, "paseo-home");
 
     // Create a git repo with an initial commit
-    execSync(`mkdir -p ${repoDir}`);
+    mkdirSync(repoDir, { recursive: true });
     execSync("git init -b main", { cwd: repoDir });
-    execSync("git config user.email 'test@test.com'", { cwd: repoDir });
-    execSync("git config user.name 'Test'", { cwd: repoDir });
-    execSync("echo 'hello' > file.txt", { cwd: repoDir });
+    execSync('git config user.email "test@test.com"', { cwd: repoDir });
+    execSync('git config user.name "Test"', { cwd: repoDir });
+    execSync('echo "hello" > file.txt', { cwd: repoDir });
     execSync("git add .", { cwd: repoDir });
-    execSync("git -c commit.gpgsign=false commit -m 'initial'", { cwd: repoDir });
+    execSync('git -c commit.gpgsign=false commit -m "initial"', { cwd: repoDir });
   });
 
   afterEach(() => {
@@ -70,13 +78,13 @@ describe("createWorktree", () => {
     const privateTempDir = realpathSync(varTempDir);
     const varRepoDir = join(varTempDir, "test-repo");
     const varPaseoHome = join(varTempDir, "paseo-home");
-    execSync(`mkdir -p ${varRepoDir}`);
+    mkdirSync(varRepoDir, { recursive: true });
     execSync("git init -b main", { cwd: varRepoDir });
-    execSync("git config user.email 'test@test.com'", { cwd: varRepoDir });
-    execSync("git config user.name 'Test'", { cwd: varRepoDir });
-    execSync("echo 'hello' > file.txt", { cwd: varRepoDir });
+    execSync('git config user.email "test@test.com"', { cwd: varRepoDir });
+    execSync('git config user.name "Test"', { cwd: varRepoDir });
+    execSync('echo "hello" > file.txt', { cwd: varRepoDir });
     execSync("git add .", { cwd: varRepoDir });
-    execSync("git -c commit.gpgsign=false commit -m 'initial'", { cwd: varRepoDir });
+    execSync('git -c commit.gpgsign=false commit -m "initial"', { cwd: varRepoDir });
 
     const result = await createWorktree({
       branchName: "main",
@@ -120,7 +128,7 @@ describe("createWorktree", () => {
 
   it("treats non-git directories as non-worktrees without throwing", async () => {
     const nonGitDir = join(tempDir, "not-a-repo");
-    execSync(`mkdir -p ${nonGitDir}`);
+    mkdirSync(nonGitDir, { recursive: true });
 
     const ownership = await isPaseoOwnedWorktreeCwd(nonGitDir, { paseoHome });
 
@@ -157,19 +165,19 @@ describe("createWorktree", () => {
     execSync("git push -u origin main", { cwd: repoDir });
 
     execSync(`git clone ${remoteDir} ${remoteCloneDir}`);
-    execSync("git config user.email 'test@test.com'", { cwd: remoteCloneDir });
-    execSync("git config user.name 'Test'", { cwd: remoteCloneDir });
+    execSync('git config user.email "test@test.com"', { cwd: remoteCloneDir });
+    execSync('git config user.name "Test"', { cwd: remoteCloneDir });
     execSync("git checkout -B main origin/main", { cwd: remoteCloneDir });
     writeFileSync(join(remoteCloneDir, "file.txt"), "from-origin\n");
     execSync("git add file.txt", { cwd: remoteCloneDir });
-    execSync("git -c commit.gpgsign=false commit -m 'advance origin main'", {
+    execSync('git -c commit.gpgsign=false commit -m "advance origin main"', {
       cwd: remoteCloneDir,
     });
     execSync("git push origin main", { cwd: remoteCloneDir });
 
     writeFileSync(join(repoDir, "file.txt"), "from-local\n");
     execSync("git add file.txt", { cwd: repoDir });
-    execSync("git -c commit.gpgsign=false commit -m 'advance local main'", { cwd: repoDir });
+    execSync('git -c commit.gpgsign=false commit -m "advance local main"', { cwd: repoDir });
 
     execSync("git fetch origin", { cwd: repoDir });
 
@@ -188,7 +196,7 @@ describe("createWorktree", () => {
   it("falls back to local {branch} when origin/{branch} does not exist", async () => {
     writeFileSync(join(repoDir, "file.txt"), "from-local-only\n");
     execSync("git add file.txt", { cwd: repoDir });
-    execSync("git -c commit.gpgsign=false commit -m 'advance local main only'", { cwd: repoDir });
+    execSync('git -c commit.gpgsign=false commit -m "advance local main only"', { cwd: repoDir });
 
     const result = await createWorktree({
       branchName: "prefer-local-fallback-feature",
@@ -280,7 +288,7 @@ describe("createWorktree", () => {
       },
     };
     writeFileSync(join(repoDir, "paseo.json"), JSON.stringify(paseoConfig));
-    execSync("git add paseo.json && git -c commit.gpgsign=false commit -m 'add paseo.json'", {
+    execSync('git add paseo.json && git -c commit.gpgsign=false commit -m "add paseo.json"', {
       cwd: repoDir,
     });
 
@@ -314,7 +322,7 @@ describe("createWorktree", () => {
       },
     };
     writeFileSync(join(repoDir, "paseo.json"), JSON.stringify(paseoConfig));
-    execSync("git add paseo.json && git -c commit.gpgsign=false commit -m 'add paseo.json'", {
+    execSync('git add paseo.json && git -c commit.gpgsign=false commit -m "add paseo.json"', {
       cwd: repoDir,
     });
 
@@ -338,7 +346,7 @@ describe("createWorktree", () => {
       },
     };
     writeFileSync(join(repoDir, "paseo.json"), JSON.stringify(paseoConfig));
-    execSync("git add paseo.json && git -c commit.gpgsign=false commit -m 'add streaming setup'", {
+    execSync('git add paseo.json && git -c commit.gpgsign=false commit -m "add streaming setup"', {
       cwd: repoDir,
     });
 
@@ -428,7 +436,7 @@ describe("createWorktree", () => {
       },
     };
     writeFileSync(join(repoDir, "paseo.json"), JSON.stringify(paseoConfig));
-    execSync("git add paseo.json && git -c commit.gpgsign=false commit -m 'add paseo.json'", {
+    execSync('git add paseo.json && git -c commit.gpgsign=false commit -m "add paseo.json"', {
       cwd: repoDir,
     });
 
@@ -581,13 +589,13 @@ describe("paseo worktree manager", () => {
     repoDir = join(tempDir, "test-repo");
     paseoHome = join(tempDir, "paseo-home");
 
-    execSync(`mkdir -p ${repoDir}`);
+    mkdirSync(repoDir, { recursive: true });
     execSync("git init -b main", { cwd: repoDir });
-    execSync("git config user.email 'test@test.com'", { cwd: repoDir });
-    execSync("git config user.name 'Test'", { cwd: repoDir });
-    execSync("echo 'hello' > file.txt", { cwd: repoDir });
+    execSync('git config user.email "test@test.com"', { cwd: repoDir });
+    execSync('git config user.name "Test"', { cwd: repoDir });
+    execSync('echo "hello" > file.txt', { cwd: repoDir });
     execSync("git add .", { cwd: repoDir });
-    execSync("git -c commit.gpgsign=false commit -m 'initial'", { cwd: repoDir });
+    execSync('git -c commit.gpgsign=false commit -m "initial"', { cwd: repoDir });
   });
 
   afterEach(() => {
@@ -599,13 +607,13 @@ describe("paseo worktree manager", () => {
     const repoB = join(tempDir, "team-b", "test-repo");
 
     for (const repo of [repoA, repoB]) {
-      execSync(`mkdir -p ${repo}`);
+      mkdirSync(repo, { recursive: true });
       execSync("git init -b main", { cwd: repo });
-      execSync("git config user.email 'test@test.com'", { cwd: repo });
-      execSync("git config user.name 'Test'", { cwd: repo });
-      execSync("echo 'hello' > file.txt", { cwd: repo });
+      execSync('git config user.email "test@test.com"', { cwd: repo });
+      execSync('git config user.name "Test"', { cwd: repo });
+      execSync('echo "hello" > file.txt', { cwd: repo });
       execSync("git add .", { cwd: repo });
-      execSync("git -c commit.gpgsign=false commit -m 'initial'", { cwd: repo });
+      execSync('git -c commit.gpgsign=false commit -m "initial"', { cwd: repo });
     }
 
     const fromRepoA = await createWorktree({
@@ -671,7 +679,7 @@ describe("paseo worktree manager", () => {
     });
 
     const nestedDir = join(created.worktreePath, "nested", "dir");
-    execSync(`mkdir -p ${nestedDir}`);
+    mkdirSync(nestedDir, { recursive: true });
 
     await deletePaseoWorktree({ cwd: repoDir, worktreePath: nestedDir, paseoHome });
     expect(existsSync(created.worktreePath)).toBe(false);
@@ -694,7 +702,7 @@ describe("paseo worktree manager", () => {
     };
     writeFileSync(join(repoDir, "paseo.json"), JSON.stringify(paseoConfig));
     execSync(
-      "git add paseo.json && git -c commit.gpgsign=false commit -m 'add teardown commands'",
+      'git add paseo.json && git -c commit.gpgsign=false commit -m "add teardown commands"',
       {
         cwd: repoDir,
       },
@@ -733,7 +741,7 @@ describe("paseo worktree manager", () => {
     };
     writeFileSync(join(repoDir, "paseo.json"), JSON.stringify(paseoConfig));
     execSync(
-      "git add paseo.json && git -c commit.gpgsign=false commit -m 'add teardown port logging'",
+      'git add paseo.json && git -c commit.gpgsign=false commit -m "add teardown port logging"',
       { cwd: repoDir },
     );
 
@@ -762,7 +770,7 @@ describe("paseo worktree manager", () => {
     };
     writeFileSync(join(repoDir, "paseo.json"), JSON.stringify(paseoConfig));
     execSync(
-      "git add paseo.json && git -c commit.gpgsign=false commit -m 'add failing teardown commands'",
+      'git add paseo.json && git -c commit.gpgsign=false commit -m "add failing teardown commands"',
       { cwd: repoDir },
     );
 

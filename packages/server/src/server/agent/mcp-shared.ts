@@ -1,20 +1,14 @@
 import { z } from "zod";
 import type { Logger } from "pino";
 
-import type { AgentPromptInput, AgentProvider, AgentPermissionRequest } from "./agent-sdk-types.js";
+import type { AgentPromptInput, AgentPermissionRequest } from "./agent-sdk-types.js";
 import type { AgentManager, ManagedAgent, WaitForAgentResult } from "./agent-manager.js";
 import { curateAgentActivity } from "./activity-curator.js";
-import { AGENT_PROVIDER_DEFINITIONS } from "./provider-registry.js";
-import type { AgentStorage } from "./agent-storage.js";
+import type { AgentSnapshotStore } from "./agent-snapshot-store.js";
 import { serializeAgentSnapshot } from "../messages.js";
 import { StoredScheduleSchema } from "../schedule/types.js";
 
-export const AgentProviderEnum = z.enum(
-  AGENT_PROVIDER_DEFINITIONS.map((definition) => definition.id) as [
-    AgentProvider,
-    ...AgentProvider[],
-  ],
-);
+export const AgentProviderEnum = z.string();
 
 export const AgentStatusEnum = z.enum(["initializing", "idle", "running", "error", "closed"]);
 
@@ -22,6 +16,8 @@ export const ProviderModeSchema = z.object({
   id: z.string(),
   label: z.string(),
   description: z.string().optional(),
+  icon: z.string().optional(),
+  colorTier: z.string().optional(),
 });
 
 export const ProviderSummarySchema = z.object({
@@ -257,7 +253,7 @@ export function sanitizePermissionRequest(
 }
 
 export async function resolveAgentTitle(
-  agentStorage: AgentStorage,
+  agentStorage: AgentSnapshotStore,
   agentId: string,
   logger: Logger,
 ): Promise<string | null> {
@@ -271,7 +267,7 @@ export async function resolveAgentTitle(
 }
 
 export async function serializeSnapshotWithMetadata(
-  agentStorage: AgentStorage,
+  agentStorage: AgentSnapshotStore,
   snapshot: ManagedAgent,
   logger: Logger,
 ) {

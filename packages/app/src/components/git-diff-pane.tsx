@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Pressable,
   FlatList,
-  Platform,
   type LayoutChangeEvent,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -80,6 +79,7 @@ import {
   formatDiffGutterText,
   hasVisibleDiffTokens,
 } from "@/utils/diff-rendering";
+import { isWeb, isNative } from "@/constants/platform";
 
 export type { GitActionId, GitAction, GitActions } from "@/components/git-actions-policy";
 
@@ -100,7 +100,7 @@ type WrappedWebTextStyle = TextStyle & {
 };
 
 function getWrappedTextStyle(wrapLines: boolean): WrappedWebTextStyle | undefined {
-  if (Platform.OS !== "web") {
+  if (isNative) {
     return undefined;
   }
   return wrapLines
@@ -454,7 +454,7 @@ const DiffFileHeader = memo(function DiffFileHeader({
         }}
         onPressOut={(event) => {
           if (
-            Platform.OS !== "web" &&
+            isNative &&
             !pressHandledRef.current &&
             layoutYRef.current === 0 &&
             pressInRef.current
@@ -632,8 +632,8 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   const { theme } = useUnistyles();
   const toast = useToast();
   const isMobile = useIsCompactFormFactor();
-  const showDesktopWebScrollbar = Platform.OS === "web" && !isMobile;
-  const canUseSplitLayout = Platform.OS === "web" && !isMobile;
+  const showDesktopWebScrollbar = isWeb && !isMobile;
+  const canUseSplitLayout = isWeb && !isMobile;
   const router = useRouter();
   const [diffModeOverride, setDiffModeOverride] = useState<"uncommitted" | "base" | null>(null);
   const [postShipArchiveSuggested, setPostShipArchiveSuggested] = useState(false);

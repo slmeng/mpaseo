@@ -116,11 +116,14 @@ export class DbAgentSnapshotStore implements AgentSnapshotStore {
   async upsert(record: StoredAgentRecord, workspaceId: number): Promise<void>;
   async upsert(record: StoredAgentRecord, workspaceId?: number): Promise<void> {
     const nextWorkspaceId =
-      workspaceId ?? (await this.db
-        .select({ workspaceId: agentSnapshots.workspaceId })
-        .from(agentSnapshots)
-        .where(eq(agentSnapshots.agentId, record.id))
-        .limit(1))[0]?.workspaceId;
+      workspaceId ??
+      (
+        await this.db
+          .select({ workspaceId: agentSnapshots.workspaceId })
+          .from(agentSnapshots)
+          .where(eq(agentSnapshots.agentId, record.id))
+          .limit(1)
+      )[0]?.workspaceId;
     if (nextWorkspaceId === undefined) {
       throw new Error(`Workspace ID required for agent ${record.id}`);
     }
@@ -159,13 +162,14 @@ export class DbAgentSnapshotStore implements AgentSnapshotStore {
     const nextWorkspaceId =
       typeof workspaceIdOrOptions === "number"
         ? workspaceIdOrOptions
-        : (await this.db
-            .select({ workspaceId: agentSnapshots.workspaceId })
-            .from(agentSnapshots)
-            .where(eq(agentSnapshots.agentId, agent.id))
-            .limit(1))[0]?.workspaceId;
-    const nextOptions =
-      typeof workspaceIdOrOptions === "number" ? options : workspaceIdOrOptions;
+        : (
+            await this.db
+              .select({ workspaceId: agentSnapshots.workspaceId })
+              .from(agentSnapshots)
+              .where(eq(agentSnapshots.agentId, agent.id))
+              .limit(1)
+          )[0]?.workspaceId;
+    const nextOptions = typeof workspaceIdOrOptions === "number" ? options : workspaceIdOrOptions;
     const existing = await this.get(agent.id);
     const hasTitleOverride =
       nextOptions !== undefined && Object.prototype.hasOwnProperty.call(nextOptions, "title");

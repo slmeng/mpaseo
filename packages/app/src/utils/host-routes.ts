@@ -321,7 +321,11 @@ export function buildHostAgentDetailRoute(serverId: string, agentId: string, wor
     if (!normalizedAgentId) {
       return "/" as const;
     }
-    return buildHostWorkspaceOpenRoute(serverId, normalizedWorkspaceId, `agent:${normalizedAgentId}`);
+    return buildHostWorkspaceOpenRoute(
+      serverId,
+      normalizedWorkspaceId,
+      `agent:${normalizedAgentId}`,
+    );
   }
   const normalizedServerId = trimNonEmpty(serverId);
   const normalizedAgentId = trimNonEmpty(agentId);
@@ -359,7 +363,7 @@ export function buildHostNewWorkspaceRoute(
   serverId: string,
   sourceDirectory: string,
   options?: { displayName?: string },
-){
+) {
   const base = buildHostRootRoute(serverId);
   if (base === "/") {
     return "/" as const;

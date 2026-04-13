@@ -1,4 +1,4 @@
-import { View, Pressable, Text, ActivityIndicator, Platform } from "react-native";
+import { View, Pressable, Text, ActivityIndicator } from "react-native";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -50,6 +50,7 @@ import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import { submitAgentInput } from "@/components/agent-input-submit";
 import { useAppSettings } from "@/hooks/use-settings";
+import { isWeb, isNative } from "@/constants/platform";
 
 type QueuedMessage = {
   id: string;
@@ -126,7 +127,7 @@ export function Composer({
 }: ComposerProps) {
   markScrollInvestigationRender(`Composer:${serverId}:${agentId}`);
   const { theme } = useUnistyles();
-  const buttonIconSize = Platform.OS === "web" ? theme.iconSize.md : theme.iconSize.lg;
+  const buttonIconSize = isWeb ? theme.iconSize.md : theme.iconSize.lg;
   const insets = useSafeAreaInsets();
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
@@ -164,7 +165,7 @@ export function Composer({
   const setAgentStreamHead = useSessionStore((state) => state.setAgentStreamHead);
 
   const isMobile = useIsCompactFormFactor();
-  const isDesktopWebBreakpoint = Platform.OS === "web" && !isMobile;
+  const isDesktopWebBreakpoint = isWeb && !isMobile;
   const messagePlaceholder = isDesktopWebBreakpoint
     ? DESKTOP_MESSAGE_PLACEHOLDER
     : MOBILE_MESSAGE_PLACEHOLDER;
@@ -225,7 +226,7 @@ export function Composer({
   }, [addImages, onAddImages]);
 
   const focusInput = useCallback(() => {
-    if (Platform.OS !== "web") return;
+    if (isNative) return;
     focusWithRetries({
       focus: () => messageInputRef.current?.focus(),
       isFocused: () => {
@@ -438,7 +439,7 @@ export function Composer({
         case "message-input.dictation-confirm":
           return messageInputRef.current?.runKeyboardAction("dictation-confirm") ?? false;
         case "message-input.focus":
-          if (Platform.OS !== "web") {
+          if (isNative) {
             messageInputRef.current?.focus();
             return true;
           }
@@ -632,14 +633,19 @@ export function Composer({
               style={({ hovered }) => [
                 styles.realtimeVoiceButton as any,
                 (hovered ? styles.iconButtonHovered : undefined) as any,
-                (!isConnected || voice?.isVoiceSwitching ? styles.buttonDisabled : undefined) as any,
+                (!isConnected || voice?.isVoiceSwitching
+                  ? styles.buttonDisabled
+                  : undefined) as any,
               ]}
             >
               {({ hovered }) =>
                 voice?.isVoiceSwitching ? (
                   <ActivityIndicator size="small" color="white" />
                 ) : (
-                  <AudioLines size={buttonIconSize} color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted} />
+                  <AudioLines
+                    size={buttonIconSize}
+                    color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                  />
                 )
               }
             </TooltipTrigger>

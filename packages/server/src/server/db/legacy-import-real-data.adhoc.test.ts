@@ -98,9 +98,7 @@ describe("legacy import from real ~/.paseo data", () => {
     const paseoProject = paseoProjects[0]!;
 
     // 4. All paseo workspaces (worktrees + main checkout + subdirs) should be under that one project
-    const paseoWorkspaces = allWorkspaces.filter(
-      (w) => w.projectId === paseoProject.id,
-    );
+    const paseoWorkspaces = allWorkspaces.filter((w) => w.projectId === paseoProject.id);
     console.log(`Paseo project id=${paseoProject.id}, directory=${paseoProject.directory}`);
     console.log(`Paseo workspaces: ${paseoWorkspaces.length}`);
 
@@ -108,9 +106,7 @@ describe("legacy import from real ~/.paseo data", () => {
     expect(paseoWorkspaces.length).toBeGreaterThanOrEqual(10);
 
     // 5. Subdirectory workspaces (packages/server, packages/app) should be under the same project
-    const subdirWorkspaces = paseoWorkspaces.filter((w) =>
-      w.directory.includes("/packages/"),
-    );
+    const subdirWorkspaces = paseoWorkspaces.filter((w) => w.directory.includes("/packages/"));
     console.log(`Paseo subdirectory workspaces: ${subdirWorkspaces.length}`);
     for (const w of subdirWorkspaces) {
       console.log(`  ${w.directory} (projectId=${w.projectId})`);

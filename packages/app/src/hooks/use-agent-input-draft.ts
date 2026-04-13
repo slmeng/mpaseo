@@ -123,7 +123,9 @@ function buildDraftComposerCommandConfig(input: {
   return {
     provider: input.provider,
     cwd,
-    ...(input.modeOptions.length > 0 && input.selectedMode !== "" ? { modeId: input.selectedMode } : {}),
+    ...(input.modeOptions.length > 0 && input.selectedMode !== ""
+      ? { modeId: input.selectedMode }
+      : {}),
     ...(input.effectiveModelId ? { model: input.effectiveModelId } : {}),
     ...(input.effectiveThinkingOptionId
       ? { thinkingOptionId: input.effectiveThinkingOptionId }

@@ -209,10 +209,7 @@ export class WorkspaceReconciliationService {
           workspace.directory.split(/[\\/]/).filter(Boolean).at(-1) ?? workspace.directory;
         const wsGit = detectWorkspaceGitMetadata(workspace.directory, wsDirName);
 
-        if (
-          wsGit.projectKind === "git" &&
-          workspace.displayName !== wsGit.workspaceDisplayName
-        ) {
+        if (wsGit.projectKind === "git" && workspace.displayName !== wsGit.workspaceDisplayName) {
           const timestamp = new Date().toISOString();
           await this.workspaceRegistry.upsert({
             ...workspace,

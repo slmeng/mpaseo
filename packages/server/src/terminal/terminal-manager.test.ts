@@ -301,7 +301,8 @@ describe("TerminalManager", () => {
   describe("subscribeTerminalsChanged", () => {
     it("emits cwd snapshots when terminals are created", async () => {
       manager = createTerminalManager();
-      const snapshots: Array<{ cwd: string; terminals: Array<{ name: string; title?: string }> }> = [];
+      const snapshots: Array<{ cwd: string; terminals: Array<{ name: string; title?: string }> }> =
+        [];
       const unsubscribe = manager.subscribeTerminalsChanged((input) => {
         snapshots.push({
           cwd: input.cwd,
@@ -327,37 +328,33 @@ describe("TerminalManager", () => {
       unsubscribe();
     });
 
-    it(
-      "emits updated terminal titles after debounced title changes",
-      async () => {
-        await withShell("/bin/sh", async () => {
-          manager = createTerminalManager();
-          const snapshots: Array<Array<{ id: string; title?: string }>> = [];
-          const unsubscribe = manager.subscribeTerminalsChanged((input) => {
-            snapshots.push(
-              input.terminals.map((terminal) => ({
-                id: terminal.id,
-                ...(terminal.title ? { title: terminal.title } : {}),
-              })),
-            );
-          });
-
-          const session = await manager.createTerminal({ cwd: "/tmp" });
-          session.send({ type: "input", data: "printf '\\033]0;Logs\\007'\r" });
-
-          await waitForCondition(
-            () =>
-              snapshots.some((snapshot) =>
-                snapshot.some((terminal) => terminal.id === session.id && terminal.title === "Logs"),
-              ),
-            10000,
+    it("emits updated terminal titles after debounced title changes", async () => {
+      await withShell("/bin/sh", async () => {
+        manager = createTerminalManager();
+        const snapshots: Array<Array<{ id: string; title?: string }>> = [];
+        const unsubscribe = manager.subscribeTerminalsChanged((input) => {
+          snapshots.push(
+            input.terminals.map((terminal) => ({
+              id: terminal.id,
+              ...(terminal.title ? { title: terminal.title } : {}),
+            })),
           );
-
-          unsubscribe();
         });
-      },
-      10000,
-    );
+
+        const session = await manager.createTerminal({ cwd: "/tmp" });
+        session.send({ type: "input", data: "printf '\\033]0;Logs\\007'\r" });
+
+        await waitForCondition(
+          () =>
+            snapshots.some((snapshot) =>
+              snapshot.some((terminal) => terminal.id === session.id && terminal.title === "Logs"),
+            ),
+          10000,
+        );
+
+        unsubscribe();
+      });
+    }, 10000);
 
     it("emits empty snapshot when last terminal is removed", async () => {
       manager = createTerminalManager();

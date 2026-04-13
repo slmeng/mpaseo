@@ -19,7 +19,12 @@ describe("worktree shell selection", () => {
   beforeEach(() => {
     execFileMock.mockReset();
     execFileMock.mockImplementation(
-      (_file: string, _args: string[], _options: unknown, callback?: (error: Error | null, stdout: string, stderr: string) => void) => {
+      (
+        _file: string,
+        _args: string[],
+        _options: unknown,
+        callback?: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => {
         callback?.(null, "", "");
         return {};
       },

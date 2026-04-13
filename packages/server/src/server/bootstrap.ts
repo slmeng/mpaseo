@@ -120,7 +120,10 @@ import { startRelayTransport, type RelayTransportController } from "./relay-tran
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
 import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
-import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
+import type {
+  AgentProviderRuntimeSettingsMap,
+  ProviderOverride,
+} from "./agent/provider-launch-config.js";
 import { isHostAllowed, type AllowedHostsConfig } from "./allowed-hosts.js";
 import {
   ScriptRouteStore,
@@ -130,11 +133,6 @@ import {
 import { ScriptHealthMonitor } from "./script-health-monitor.js";
 import { createScriptStatusEmitter } from "./script-status-projection.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
-import {
-  createVoiceMcpSocketBridgeManager,
-  type VoiceMcpSocketBridgeManager,
-} from "./voice-mcp-bridge.js";
-import { resolveVoiceMcpBridgeFromRuntime } from "./voice-mcp-bridge-command.js";
 
 type AgentMcpTransportMap = Map<string, StreamableHTTPServerTransport>;
 
@@ -196,6 +194,7 @@ export type PaseoDaemonConfig = {
   dictationFinalTimeoutMs?: number;
   downloadTokenTtlMs?: number;
   agentProviderSettings?: AgentProviderRuntimeSettingsMap;
+  providerOverrides?: Record<string, ProviderOverride>;
   onLifecycleIntent?: (intent: DaemonLifecycleIntent) => void;
 };
 
@@ -283,9 +282,7 @@ export async function createPaseoDaemon(
     // and forwards them to the corresponding local script port. Placed after
     // the host allowlist (*.localhost is already allowed) but before CORS and
     // the rest of the routes so proxied requests skip unnecessary middleware.
-    app.use(
-      createScriptProxyMiddleware({ routeStore: scriptRouteStore, logger }),
-    );
+    app.use(createScriptProxyMiddleware({ routeStore: scriptRouteStore, logger }));
 
     // CORS - allow same-origin + configured origins
     const allowedOrigins = new Set([
@@ -412,6 +409,7 @@ export async function createPaseoDaemon(
       clients: {
         ...createAllClients(logger, {
           runtimeSettings: config.agentProviderSettings,
+          providerOverrides: config.providerOverrides,
         }),
         ...config.agentClients,
       },
@@ -422,6 +420,7 @@ export async function createPaseoDaemon(
     });
     const providerRegistry = buildProviderRegistry(logger, {
       runtimeSettings: config.agentProviderSettings,
+      providerOverrides: config.providerOverrides,
     });
 
     const projectRegistry = new DbProjectRegistry(database.db);
@@ -486,32 +485,6 @@ export async function createPaseoDaemon(
       "Voice mode configured for agent-scoped resume flow (no dedicated voice assistant provider)",
     );
     logger.info({ elapsed: elapsed() }, "Preparing voice and MCP runtime");
-    let voiceMcpBridgeManager: VoiceMcpSocketBridgeManager | null = null;
-
-    // Create in-memory transport for Session's Agent MCP client (voice assistant tools)
-    const createInMemoryAgentMcpTransport = async (): Promise<InMemoryTransport> => {
-      const agentMcpServer = await createAgentMcpServer({
-        agentManager,
-        agentStorage,
-        terminalManager,
-        getDaemonTcpPort: () =>
-          boundListenTarget?.type === "tcp" ? boundListenTarget.port : null,
-        paseoHome: config.paseoHome,
-        enableVoiceTools: false,
-        resolveSpeakHandler: (callerAgentId) =>
-          wsServer?.resolveVoiceSpeakHandler(callerAgentId) ?? null,
-        resolveCallerContext: (callerAgentId) =>
-          wsServer?.resolveVoiceCallerContext(callerAgentId) ?? null,
-        logger,
-      });
-
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-
-      await agentMcpServer.connect(serverTransport);
-
-      return clientTransport;
-    };
-
     const mcpEnabled = config.mcpEnabled ?? true;
     let agentMcpBaseUrl: string | null = null;
     if (mcpEnabled) {
@@ -637,27 +610,6 @@ export async function createPaseoDaemon(
       logger.info("Agent MCP HTTP endpoint disabled");
     }
 
-    const voiceMcpSocketDir = path.join(config.paseoHome, "runtime", "voice-mcp");
-    const voiceMcpBridgeCommand = resolveVoiceMcpBridgeCommand(logger);
-    voiceMcpBridgeManager = createVoiceMcpSocketBridgeManager({
-      runtimeDir: voiceMcpSocketDir,
-      logger,
-      createAgentMcpServerForCaller: async (callerAgentId) => {
-        return createAgentMcpServer({
-          agentManager,
-          agentStorage,
-          terminalManager,
-          getDaemonTcpPort: () =>
-            boundListenTarget?.type === "tcp" ? boundListenTarget.port : null,
-          paseoHome: config.paseoHome,
-          callerAgentId,
-          voiceOnly: true,
-          resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
-          resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
-          logger,
-        });
-      },
-    });
     const speechService = createSpeechService({
       logger,
       openaiConfig: config.openai,
@@ -719,26 +671,10 @@ export async function createPaseoDaemon(
               speechService,
               terminalManager,
               {
-                voiceAgentMcpStdio: voiceMcpBridgeCommand
-                  ? {
-                      command: voiceMcpBridgeCommand.command,
-                      baseArgs: [...voiceMcpBridgeCommand.baseArgs],
-                      env: {
-                        ELECTRON_RUN_AS_NODE: "1",
-                        PASEO_HOME: config.paseoHome,
-                      },
-                    }
-                  : null,
-                ensureVoiceMcpSocketForAgent: (agentId) =>
-                  voiceMcpBridgeManager?.ensureBridgeForCaller(agentId) ??
-                  Promise.reject(new Error("Voice MCP bridge manager is not initialized")),
-                removeVoiceMcpSocketForAgent: (agentId) =>
-                  voiceMcpBridgeManager?.removeBridgeForCaller(agentId) ?? Promise.resolve(),
-              },
-              {
                 finalTimeoutMs: config.dictationFinalTimeoutMs,
               },
               config.agentProviderSettings,
+              config.providerOverrides,
               daemonVersion,
               (intent) => {
                 try {
@@ -825,6 +761,7 @@ export async function createPaseoDaemon(
       await agentManager.flush().catch(() => undefined);
       await shutdownProviders(logger, {
         runtimeSettings: config.agentProviderSettings,
+        providerOverrides: config.providerOverrides,
       });
       terminalManager.killAll();
       speechService.stop();
@@ -832,9 +769,6 @@ export async function createPaseoDaemon(
       await relayTransport?.stop().catch(() => undefined);
       if (wsServer) {
         await wsServer.close();
-      }
-      if (voiceMcpBridgeManager) {
-        await voiceMcpBridgeManager.stop().catch(() => undefined);
       }
       await database?.close().catch(() => undefined);
       await new Promise<void>((resolve) => {

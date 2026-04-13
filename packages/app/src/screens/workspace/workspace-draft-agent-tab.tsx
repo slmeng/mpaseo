@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from "react";
-import { Keyboard, Platform, ScrollView, Text, View } from "react-native";
+import { Keyboard, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import invariant from "tiny-invariant";
 import { Composer } from "@/components/composer";
@@ -17,6 +17,7 @@ import { getWorkspaceExecutionAuthority } from "@/utils/workspace-execution";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
 import type { AgentCapabilityFlags } from "@server/server/agent/agent-sdk-types";
 import type { AgentSnapshotPayload } from "@server/shared/messages";
+import { isWeb } from "@/constants/platform";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
 const DRAFT_CAPABILITIES: AgentCapabilityFlags = {
@@ -63,18 +64,16 @@ export function WorkspaceDraftAgentTab({
       }),
     [draftId, serverId, tabId],
   );
-  const draftInput = useAgentInputDraft(
-    {
-      draftKey: draftStoreKey,
-      composer: {
-        initialServerId: serverId,
-        initialValues: workspaceDirectory ? { workingDir: workspaceDirectory } : undefined,
-        isVisible: true,
-        onlineServerIds: isConnected ? [serverId] : [],
-        lockedWorkingDir: workspaceDirectory ?? undefined,
-      },
+  const draftInput = useAgentInputDraft({
+    draftKey: draftStoreKey,
+    composer: {
+      initialServerId: serverId,
+      initialValues: workspaceDirectory ? { workingDir: workspaceDirectory } : undefined,
+      isVisible: true,
+      onlineServerIds: isConnected ? [serverId] : [],
+      lockedWorkingDir: workspaceDirectory ?? undefined,
     },
-  );
+  });
   const composerState = draftInput.composerState;
   if (!composerState) {
     throw new Error("Workspace draft composer state is required");
@@ -112,7 +111,7 @@ export function WorkspaceDraftAgentTab({
     },
     onBeforeSubmit: () => {
       void composerState.persistFormPreferences();
-      if (Platform.OS === "web") {
+      if (isWeb) {
         (document.activeElement as HTMLElement | null)?.blur?.();
       }
       Keyboard.dismiss();

@@ -43,8 +43,7 @@ export class InMemoryAgentTimelineStore {
     const rows = options?.rows?.length
       ? options.rows.map(cloneRow)
       : this.buildRowsFromItems(options?.items ?? [], options?.nextSeq ?? 1, timestamp);
-    const nextSeq =
-      options?.nextSeq ?? (rows.length ? rows[rows.length - 1]!.seq + 1 : 1);
+    const nextSeq = options?.nextSeq ?? (rows.length ? rows[rows.length - 1]!.seq + 1 : 1);
     this.states.set(agentId, {
       rows,
       nextSeq,
@@ -94,7 +93,9 @@ export class InMemoryAgentTimelineStore {
 
     if (direction === "tail") {
       const selected =
-        selectAll || limit >= state.rows.length ? state.rows : state.rows.slice(state.rows.length - limit);
+        selectAll || limit >= state.rows.length
+          ? state.rows
+          : state.rows.slice(state.rows.length - limit);
       return {
         direction,
         window,

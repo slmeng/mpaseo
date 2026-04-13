@@ -107,10 +107,13 @@ test.describe("Workspace lifecycle", () => {
       try {
         await seedProjectForWorkspaceSetup(client, repo.path);
 
-        execSync(`git worktree add ${JSON.stringify(worktreePath)} -b ${JSON.stringify(branchName)} main`, {
-          cwd: repo.path,
-          stdio: "ignore",
-        });
+        execSync(
+          `git worktree add ${JSON.stringify(worktreePath)} -b ${JSON.stringify(branchName)} main`,
+          {
+            cwd: repo.path,
+            stdio: "ignore",
+          },
+        );
         worktreeCreated = true;
 
         const workspaceResult = await client.openProject(worktreePath);
@@ -154,10 +157,13 @@ test.describe("Workspace lifecycle", () => {
       try {
         await seedProjectForWorkspaceSetup(client, repo.path);
 
-        execSync(`git worktree add ${JSON.stringify(worktreePath)} -b ${JSON.stringify(branchName)} main`, {
-          cwd: repo.path,
-          stdio: "ignore",
-        });
+        execSync(
+          `git worktree add ${JSON.stringify(worktreePath)} -b ${JSON.stringify(branchName)} main`,
+          {
+            cwd: repo.path,
+            stdio: "ignore",
+          },
+        );
         worktreeCreated = true;
 
         const workspaceResult = await client.openProject(worktreePath);

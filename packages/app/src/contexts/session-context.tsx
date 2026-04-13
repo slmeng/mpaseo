@@ -1,6 +1,6 @@
 import { useRef, ReactNode, useCallback, useEffect, useMemo } from "react";
 import { Buffer } from "buffer";
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useClientActivity } from "@/hooks/use-client-activity";
 import { usePushTokenRegistration } from "@/hooks/use-push-token-registration";
@@ -55,6 +55,7 @@ import { buildDraftStoreKey } from "@/stores/draft-keys";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { reconcilePreviousAgentStatuses } from "@/contexts/session-status-tracking";
 import { patchWorkspaceScripts } from "@/contexts/session-workspace-scripts";
+import { isNative } from "@/constants/platform";
 
 // Re-export types from session-store and draft-store for backward compatibility
 export type { DraftInput } from "@/stores/draft-store";
@@ -301,12 +302,13 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
   const previousAgentStatusRef = useRef<Map<string, AgentLifecycleStatus>>(new Map());
   const sendAgentMessageRef = useRef<
-    ((
-      agentId: string,
-      message: string,
-      images?: AttachmentMetadata[],
-      attachments?: AgentAttachment[],
-    ) => Promise<void>) | null
+    | ((
+        agentId: string,
+        message: string,
+        images?: AttachmentMetadata[],
+        attachments?: AgentAttachment[],
+      ) => Promise<void>)
+    | null
   >(null);
   const sessionStateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attentionNotifiedRef = useRef<Map<string, number>>(new Map());
@@ -562,7 +564,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     (awayMs: number) => {
       scheduleAuthoritativeRevalidation();
 
-      if (Platform.OS !== "web") {
+      if (isNative) {
         const session = useSessionStore.getState().sessions[serverId];
         const agentId = session?.focusedAgentId;
         const cursor = agentId ? session?.agentTimelineCursor.get(agentId) : undefined;

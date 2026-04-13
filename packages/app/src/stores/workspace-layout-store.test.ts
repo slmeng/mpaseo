@@ -393,8 +393,9 @@ describe("workspace-layout-store actions", () => {
   });
 
   it("retargetTab closes a draft tab and focuses the existing canonical target tab", () => {
-    vi.spyOn(globalThis.crypto, "randomUUID")
-      .mockReturnValueOnce("55555555-5555-5555-5555-555555555555");
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValueOnce(
+      "55555555-5555-5555-5555-555555555555",
+    );
     const workspaceKey = createWorkspaceKey();
     const store = useWorkspaceLayoutStore.getState();
 
@@ -432,12 +433,18 @@ describe("workspace-layout-store actions", () => {
     const workspaceKey = createWorkspaceKey();
     const store = useWorkspaceLayoutStore.getState();
 
-    const firstDraftTabId = store.openTab(workspaceKey, { kind: "draft", draftId: "draft-agent-1" });
+    const firstDraftTabId = store.openTab(workspaceKey, {
+      kind: "draft",
+      draftId: "draft-agent-1",
+    });
     const firstAgentTabId = store.retargetTab(workspaceKey, firstDraftTabId!, {
       kind: "agent",
       agentId: "agent-1",
     });
-    const secondDraftTabId = store.openTab(workspaceKey, { kind: "draft", draftId: "draft-agent-2" });
+    const secondDraftTabId = store.openTab(workspaceKey, {
+      kind: "draft",
+      draftId: "draft-agent-2",
+    });
 
     const nextTabId = store.retargetTab(workspaceKey, secondDraftTabId!, {
       kind: "agent",

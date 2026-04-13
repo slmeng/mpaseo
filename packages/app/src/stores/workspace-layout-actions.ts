@@ -110,7 +110,6 @@ interface OpenTabInLayoutResult {
   tabId: string;
 }
 
-
 interface RetargetTabInLayoutInput {
   layout: WorkspaceLayout;
   tabId: string;
@@ -802,7 +801,8 @@ function replaceTabInTree(
               }
             : tab,
         ),
-        focusedTabId: node.pane.focusedTabId === input.tabId ? input.nextTabId : node.pane.focusedTabId,
+        focusedTabId:
+          node.pane.focusedTabId === input.tabId ? input.nextTabId : node.pane.focusedTabId,
       }),
     };
   });
@@ -1388,7 +1388,9 @@ function isEntityTarget(
   return target.kind === "agent" || target.kind === "terminal";
 }
 
-function isAgentTab(tab: WorkspaceTab): tab is WorkspaceTab & { target: { kind: "agent"; agentId: string } } {
+function isAgentTab(
+  tab: WorkspaceTab,
+): tab is WorkspaceTab & { target: { kind: "agent"; agentId: string } } {
   return tab.target.kind === "agent";
 }
 
@@ -1398,7 +1400,10 @@ function isTerminalTab(
   return tab.target.kind === "terminal";
 }
 
-function openEntityTabWithoutFocusing(layout: WorkspaceLayout, target: WorkspaceTabTarget): WorkspaceLayout {
+function openEntityTabWithoutFocusing(
+  layout: WorkspaceLayout,
+  target: WorkspaceTabTarget,
+): WorkspaceLayout {
   const internalLayout = asInternalLayout(layout);
   const focusedPane =
     findPaneById(internalLayout.root, internalLayout.focusedPaneId) ??
@@ -1445,7 +1450,9 @@ export function reconcileWorkspaceTabs(
   }
 
   const initialTabs = collectAllTabs(nextLayout.root);
-  const representedAgentIds = new Set(initialTabs.filter(isAgentTab).map((tab) => tab.target.agentId));
+  const representedAgentIds = new Set(
+    initialTabs.filter(isAgentTab).map((tab) => tab.target.agentId),
+  );
 
   const entityGroups = new Map<
     string,
@@ -1482,10 +1489,7 @@ export function reconcileWorkspaceTabs(
     if (group.tabs.some((tab) => tab.tabId === originalFocusedTabId)) {
       reconciledFocusedTabId = canonicalTabId;
     }
-    if (
-      keeper.tabId !== canonicalTabId ||
-      !workspaceTabTargetsEqual(keeper.target, group.target)
-    ) {
+    if (keeper.tabId !== canonicalTabId || !workspaceTabTargetsEqual(keeper.target, group.target)) {
       nextLayout = {
         root: replaceTabInTree(asInternalLayout(nextLayout).root, {
           tabId: keeper.tabId,
@@ -1515,7 +1519,11 @@ export function reconcileWorkspaceTabs(
           tabId: tab.tabId,
         }) ?? nextLayout;
     }
-    if (isTerminalTab(tab) && snapshot.terminalsHydrated && !standaloneTerminalIds.has(tab.target.terminalId)) {
+    if (
+      isTerminalTab(tab) &&
+      snapshot.terminalsHydrated &&
+      !standaloneTerminalIds.has(tab.target.terminalId)
+    ) {
       nextLayout =
         closeTabInLayout({
           layout: nextLayout,

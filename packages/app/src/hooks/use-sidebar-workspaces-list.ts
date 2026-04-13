@@ -236,7 +236,6 @@ function getWorkspaceOrderScopeKey(serverId: string, projectKey: string): string
 
 function toWorkspaceDescriptor(payload: WorkspaceDescriptorPayload): WorkspaceDescriptor {
   return normalizeWorkspaceDescriptor(payload);
-
 }
 
 export function useSidebarWorkspacesList(options?: {

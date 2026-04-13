@@ -9,7 +9,9 @@ export type ResolvedWorkspaceScriptLink = {
 
 function isLoopbackHost(host: string): boolean {
   const normalizedHost = host.trim().toLowerCase();
-  return normalizedHost === "localhost" || normalizedHost === "127.0.0.1" || normalizedHost === "::1";
+  return (
+    normalizedHost === "localhost" || normalizedHost === "127.0.0.1" || normalizedHost === "::1"
+  );
 }
 
 function buildDirectServiceUrl(endpoint: string, port: number): string | null {

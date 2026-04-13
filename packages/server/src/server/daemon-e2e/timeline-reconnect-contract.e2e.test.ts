@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { createDaemonTestContext, type DaemonTestContext, DaemonClient } from "../test-utils/index.js";
+import {
+  createDaemonTestContext,
+  type DaemonTestContext,
+  DaemonClient,
+} from "../test-utils/index.js";
 import { createMessageCollector } from "../test-utils/message-collector.js";
 import type { SessionOutboundMessage } from "../messages.js";
 

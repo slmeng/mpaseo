@@ -63,9 +63,7 @@ test.describe("Tab creation", () => {
     const countAfterFirst = await countTabsOfKind(page, "draft");
 
     await pressNewTabShortcut(page);
-    await expect
-      .poll(() => countTabsOfKind(page, "draft"))
-      .toBe(countAfterFirst + 1);
+    await expect.poll(() => countTabsOfKind(page, "draft")).toBe(countAfterFirst + 1);
   });
 
   test("clicking new agent tab creates a draft tab", async ({ page }) => {
@@ -201,12 +199,7 @@ test.describe("Tab transitions (no flash)", () => {
     await gotoWorkspace(page, workspaceId);
 
     // Sample tabs at high frequency across the transition
-    const snapshots = await sampleTabsDuringTransition(
-      page,
-      () => clickNewChat(page),
-      2_000,
-      30,
-    );
+    const snapshots = await sampleTabsDuringTransition(page, () => clickNewChat(page), 2_000, 30);
 
     // Every snapshot should have at least one tab — no blank/zero-tab frames
     for (const snapshot of snapshots) {
@@ -246,12 +239,7 @@ test.describe("Tab transitions (no flash)", () => {
 
     const composer = page.getByRole("textbox", { name: "Message agent..." }).first();
 
-    const elapsed = await measureTileTransition(
-      page,
-      () => clickNewChat(page),
-      composer,
-      10_000,
-    );
+    const elapsed = await measureTileTransition(page, () => clickNewChat(page), composer, 10_000);
 
     // Draft creation is fully in-memory — should be fast
     // We use a generous budget here because CI can be slow, but the key assertion

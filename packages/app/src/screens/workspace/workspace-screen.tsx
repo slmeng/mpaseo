@@ -1,15 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "@react-navigation/native";
-import {
-  ActivityIndicator,
-  BackHandler,
-  Keyboard,
-  Platform,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import { DiffStat } from "@/components/diff-stat";
@@ -125,6 +117,7 @@ import {
 import { findAdjacentPane } from "@/utils/split-navigation";
 import { isAbsolutePath } from "@/utils/path";
 import { useIsCompactFormFactor, supportsDesktopPaneSplits } from "@/constants/layout";
+import { isWeb, isNative } from "@/constants/platform";
 
 const TERMINALS_QUERY_STALE_TIME = 5_000;
 const WORKSPACE_SETUP_AUTO_OPEN_WINDOW_MS = 30_000;
@@ -263,7 +256,7 @@ function WorkspaceDocumentTitleEffect({
   titleState: "ready" | "loading";
 }) {
   useEffect(() => {
-    if (Platform.OS !== "web" || typeof document === "undefined") {
+    if (isNative || typeof document === "undefined") {
       return;
     }
     const resolvedLabel = label.trim();
@@ -659,9 +652,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
   type ListTerminalsPayload = ListTerminalsResponse["payload"];
   const terminalsQuery = useQuery({
     queryKey: terminalsQueryKey,
-    enabled:
-      Boolean(client && isConnected) &&
-      Boolean(workspaceDirectory),
+    enabled: Boolean(client && isConnected) && Boolean(workspaceDirectory),
     queryFn: async () => {
       if (!client || !workspaceDirectory) {
         throw new Error("Host is not connected");
@@ -763,9 +754,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
       normalizedServerId,
       workspaceDirectory ?? `missing-workspace-directory:${normalizedWorkspaceId}`,
     ),
-    enabled:
-      Boolean(client && isConnected) &&
-      Boolean(workspaceDirectory),
+    enabled: Boolean(client && isConnected) && Boolean(workspaceDirectory),
     queryFn: async () => {
       if (!client || !workspaceDirectory) {
         throw new Error("Host is not connected");
@@ -840,7 +829,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
   });
 
   useEffect(() => {
-    if (Platform.OS === "web" || !isExplorerOpen) {
+    if (isWeb || !isExplorerOpen) {
       return;
     }
 
@@ -868,7 +857,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
     persistenceKey ? (state.layoutByWorkspace[persistenceKey] ?? null) : null,
   );
   const workspaceSetupSnapshot = useWorkspaceSetupStore((state) =>
-    persistenceKey ? state.snapshots[persistenceKey] ?? null : null,
+    persistenceKey ? (state.snapshots[persistenceKey] ?? null) : null,
   );
   const uiTabs = useMemo(
     () => (workspaceLayout ? collectAllTabs(workspaceLayout.root) : EMPTY_UI_TABS),
@@ -880,7 +869,9 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
   const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
   const retargetWorkspaceTab = useWorkspaceLayoutStore((state) => state.retargetTab);
-  const convertWorkspaceDraftToAgent = useWorkspaceLayoutStore((state) => state.convertDraftToAgent);
+  const convertWorkspaceDraftToAgent = useWorkspaceLayoutStore(
+    (state) => state.convertDraftToAgent,
+  );
   const reconcileWorkspaceTabs = useWorkspaceLayoutStore((state) => state.reconcileTabs);
   const splitWorkspacePane = useWorkspaceLayoutStore((state) => state.splitPane);
   const splitWorkspacePaneEmpty = useWorkspaceLayoutStore((state) => state.splitPaneEmpty);
@@ -1079,8 +1070,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
   const hasSetupTab = useMemo(
     () =>
       uiTabs.some(
-        (tab) =>
-          tab.target.kind === "setup" && tab.target.workspaceId === normalizedWorkspaceId,
+        (tab) => tab.target.kind === "setup" && tab.target.workspaceId === normalizedWorkspaceId,
       ),
     [normalizedWorkspaceId, uiTabs],
   );
@@ -1350,7 +1340,8 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
         if (isRunning) {
           const confirmed = await confirmDialog({
             title: "Archive running agent?",
-            message: "This agent is still running. Archiving it will stop the agent and close the tab.",
+            message:
+              "This agent is still running. Archiving it will stop the agent and close the tab.",
             confirmLabel: "Archive",
             cancelLabel: "Cancel",
             destructive: true,
@@ -1369,7 +1360,8 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
           });
         }
 
-        void archiveAgent({ serverId: normalizedServerId, agentId });
+        // Errors (e.g. timeout) are handled by the mutation's onSettled callback
+        void archiveAgent({ serverId: normalizedServerId, agentId }).catch(() => {});
       });
     },
     [archiveAgent, closeTab, closeWorkspaceTabWithCleanup, normalizedServerId, persistenceKey],
@@ -1803,7 +1795,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
   const canRenderDesktopPaneSplits = supportsDesktopPaneSplits();
   const shouldRenderDesktopPaneFallback = !isMobile && !canRenderDesktopPaneSplits;
   useEffect(() => {
-    if (Platform.OS !== "web" || typeof document === "undefined" || activeTabDescriptor) {
+    if (isNative || typeof document === "undefined" || activeTabDescriptor) {
       return;
     }
     document.title = "Workspace";
@@ -2038,7 +2030,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
 
   return (
     <View style={[styles.container, { backgroundColor: mainBackgroundColor }]}>
-      {Platform.OS === "web" && activeTabDescriptor ? (
+      {isWeb && activeTabDescriptor ? (
         <WorkspaceTabPresentationResolver
           tab={activeTabDescriptor}
           serverId={normalizedServerId}
@@ -2377,8 +2369,8 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
           </View>
         </View>
 
-        {(!isFocusModeEnabled || isMobile) && (
-          workspaceDirectory ? (
+        {(!isFocusModeEnabled || isMobile) &&
+          (workspaceDirectory ? (
             <ExplorerSidebar
               serverId={normalizedServerId}
               workspaceId={normalizedWorkspaceId}
@@ -2386,8 +2378,7 @@ function WorkspaceScreenContent({ serverId, workspaceId }: WorkspaceScreenProps)
               isGit={isGitCheckout}
               onOpenFile={handleOpenFileFromExplorer}
             />
-          ) : null
-        )}
+          ) : null)}
       </View>
     </View>
   );

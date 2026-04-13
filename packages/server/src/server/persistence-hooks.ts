@@ -1,13 +1,14 @@
 import type pino from "pino";
 
 import type { AgentManager } from "./agent/agent-manager.js";
-import type { AgentSessionConfig } from "./agent/agent-sdk-types.js";
+import type { AgentProvider, AgentSessionConfig } from "./agent/agent-sdk-types.js";
 import type { AgentStorage, StoredAgentRecord } from "./agent/agent-storage.js";
 import { isValidAgentProvider } from "./agent/provider-manifest.js";
 
 type LoggerLike = {
   child(bindings: Record<string, unknown>): LoggerLike;
   error(...args: any[]): void;
+  warn(...args: any[]): void;
 };
 
 function getLogger(logger: LoggerLike): LoggerLike {
@@ -16,6 +17,11 @@ function getLogger(logger: LoggerLike): LoggerLike {
 
 type AgentStoragePersistence = Pick<AgentStorage, "applySnapshot" | "list">;
 type AgentManagerStateSource = Pick<AgentManager, "subscribe">;
+
+type BuildSessionConfigOptions = {
+  validProviders?: Iterable<AgentProvider>;
+  logger?: LoggerLike;
+};
 
 /**
  * Attach AgentStorage persistence to an AgentManager instance so every
@@ -56,9 +62,18 @@ export function buildConfigOverrides(record: StoredAgentRecord): Partial<AgentSe
   };
 }
 
-export function buildSessionConfig(record: StoredAgentRecord): AgentSessionConfig {
-  if (!isValidAgentProvider(record.provider)) {
-    throw new Error(`Unknown provider '${record.provider}'`);
+export function buildSessionConfig(
+  record: StoredAgentRecord,
+  options?: BuildSessionConfigOptions,
+): AgentSessionConfig | null {
+  const validProviders = options?.validProviders;
+  const isValidProvider = validProviders ? new Set(validProviders).has(record.provider) : true;
+  if (!isValidProvider) {
+    options?.logger?.warn(
+      { agentId: record.id, provider: record.provider },
+      `Skipping persisted agent with unknown provider '${record.provider}'`,
+    );
+    return null;
   }
   const overrides = buildConfigOverrides(record);
   return {

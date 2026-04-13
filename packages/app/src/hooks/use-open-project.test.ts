@@ -93,7 +93,9 @@ describe("openProjectDirectly", () => {
 
     expect(result).toBe(true);
     expect(useSessionStore.getState().sessions[SERVER_ID]?.hasHydratedWorkspaces).toBe(true);
-    expect(Array.from(useSessionStore.getState().sessions[SERVER_ID]?.workspaces.values() ?? [])).toEqual([
+    expect(
+      Array.from(useSessionStore.getState().sessions[SERVER_ID]?.workspaces.values() ?? []),
+    ).toEqual([
       expect.objectContaining({
         id: "1",
         projectId: "1",

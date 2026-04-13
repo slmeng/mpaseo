@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import ReanimatedAnimated from "react-native-reanimated";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
@@ -46,6 +46,7 @@ import {
   deriveRouteBottomAnchorIntent,
   deriveRouteBottomAnchorRequest,
 } from "@/screens/agent/agent-ready-screen-bottom-anchor";
+import { isNative } from "@/constants/platform";
 
 function formatProviderLabel(provider: Agent["provider"]): string {
   if (!provider) {
@@ -242,7 +243,7 @@ function AgentPanelBody({
   );
   const agentState = useSessionStore(
     useShallow((state) => {
-      const agent = agentId ? state.sessions[serverId]?.agents?.get(agentId) ?? null : null;
+      const agent = agentId ? (state.sessions[serverId]?.agents?.get(agentId) ?? null) : null;
       return {
         serverId: agent?.serverId ?? null,
         id: agent?.id ?? null,
@@ -690,7 +691,14 @@ function ChatAgentContent({
             projectPlacement,
           }
         : null,
-    [agentState.serverId, agentState.id, agentState.status, agentState.cwd, agentState.lastError, projectPlacement],
+    [
+      agentState.serverId,
+      agentState.id,
+      agentState.status,
+      agentState.cwd,
+      agentState.lastError,
+      projectPlacement,
+    ],
   );
 
   const placeholderAgent: AgentScreenAgent | null = useMemo(() => {
@@ -791,7 +799,7 @@ function ChatAgentContent({
     if (!isConnected || !hasSession) {
       return;
     }
-    const shouldSyncOnEntry = needsAuthoritativeSync || Platform.OS !== "web";
+    const shouldSyncOnEntry = needsAuthoritativeSync || isNative;
     if (!shouldSyncOnEntry) {
       return;
     }

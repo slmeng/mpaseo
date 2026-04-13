@@ -158,7 +158,9 @@ export function resolveZshShellIntegrationDir(): string {
   return fileURLToPath(new URL("./shell-integration/zsh", import.meta.url));
 }
 
-export function buildTerminalEnvironment(input: BuildTerminalEnvironmentInput): Record<string, string> {
+export function buildTerminalEnvironment(
+  input: BuildTerminalEnvironmentInput,
+): Record<string, string> {
   const baseEnv: Record<string, string> = {
     ...process.env,
     ...input.env,
@@ -433,10 +435,7 @@ function extractLastOutputLines(terminal: TerminalType, limit: number): string[]
 }
 
 function stripAnsiSequences(input: string): string {
-  return input.replace(
-    /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g,
-    "",
-  );
+  return input.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g, "");
 }
 
 function extractLastOutputLinesFromText(text: string, limit: number): string[] {
@@ -577,8 +576,8 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   }
 
   const initialTitle = command
-    ? humanizeProcessTitle([command, ...args].join(" ")) ??
-      normalizeProcessTitle([command, ...args].join(" "))
+    ? (humanizeProcessTitle([command, ...args].join(" ")) ??
+      normalizeProcessTitle([command, ...args].join(" ")))
     : undefined;
   emitTitleChange(initialTitle);
 
@@ -605,7 +604,10 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     }, TERMINAL_TITLE_DEBOUNCE_MS);
   });
 
-  function buildExitInfo(input?: { exitCode?: number | null; signal?: number | null }): TerminalExitInfo {
+  function buildExitInfo(input?: {
+    exitCode?: number | null;
+    signal?: number | null;
+  }): TerminalExitInfo {
     const lastOutputLines = extractLastOutputLines(terminal, TERMINAL_EXIT_OUTPUT_LINE_LIMIT);
     return {
       exitCode: input?.exitCode ?? null,

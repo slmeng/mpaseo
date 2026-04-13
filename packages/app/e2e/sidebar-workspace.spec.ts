@@ -57,7 +57,10 @@ async function openProjectViaDaemon(
   };
 }
 
-async function openWorkspaceFromSidebar(page: import("@playwright/test").Page, workspaceId: string) {
+async function openWorkspaceFromSidebar(
+  page: import("@playwright/test").Page,
+  workspaceId: string,
+) {
   const row = page.getByTestId(getWorkspaceRowTestId(workspaceId));
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.click();
@@ -65,10 +68,7 @@ async function openWorkspaceFromSidebar(page: import("@playwright/test").Page, w
   return row;
 }
 
-async function waitForSidebarProject(
-  page: import("@playwright/test").Page,
-  projectName: string,
-) {
+async function waitForSidebarProject(page: import("@playwright/test").Page, projectName: string) {
   const row = page
     .getByRole("button", {
       name: new RegExp(escapeRegex(projectName), "i"),

@@ -387,8 +387,8 @@ describe("AgentLoadingService", () => {
       } as any,
     });
 
-    await expect(
-      service.refreshAgent({ agentId: "agent-compat-no-persistence" }),
-    ).rejects.toThrow("Agent agent-compat-no-persistence cannot be refreshed because it lacks persistence");
+    await expect(service.refreshAgent({ agentId: "agent-compat-no-persistence" })).rejects.toThrow(
+      "Agent agent-compat-no-persistence cannot be refreshed because it lacks persistence",
+    );
   });
 });

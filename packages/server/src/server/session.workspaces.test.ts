@@ -180,10 +180,12 @@ function createWorkspaceRuntimeSnapshot(
   };
 }
 
-function createSessionForWorkspaceTests(options: {
-  appVersion?: string | null;
-  workspaceGitService?: ReturnType<typeof createNoopWorkspaceGitService>;
-} = {}): {
+function createSessionForWorkspaceTests(
+  options: {
+    appVersion?: string | null;
+    workspaceGitService?: ReturnType<typeof createNoopWorkspaceGitService>;
+  } = {},
+): {
   session: Session;
   emitted: Array<{ type: string; payload: unknown }>;
   projects: Map<number, ReturnType<typeof createPersistedProjectRecord>>;
@@ -344,10 +346,10 @@ function seedWorkspace(options: {
   return record;
 }
 
-function createTempGitRepo(options?: {
-  remoteUrl?: string;
-  branchName?: string;
-}): { tempDir: string; repoDir: string } {
+function createTempGitRepo(options?: { remoteUrl?: string; branchName?: string }): {
+  tempDir: string;
+  repoDir: string;
+} {
   const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "session-workspace-git-")));
   const repoDir = path.join(tempDir, "repo");
   execSync(`mkdir -p ${repoDir}`);
@@ -1205,9 +1207,7 @@ describe("workspace aggregation", () => {
 
       const response = emitted.find(
         (message) => message.type === "create_paseo_worktree_response",
-      ) as
-        | { type: "create_paseo_worktree_response"; payload: any }
-        | undefined;
+      ) as { type: "create_paseo_worktree_response"; payload: any } | undefined;
 
       expect(response?.payload.error).toBeNull();
       expect(response?.payload.workspace).toMatchObject({
@@ -1329,9 +1329,9 @@ describe("workspace aggregation", () => {
       requestId: "req-open",
     });
 
-    expect(Array.from(workspaces.values()).some((workspace) => workspace.directory === "/tmp/repo")).toBe(
-      true,
-    );
+    expect(
+      Array.from(workspaces.values()).some((workspace) => workspace.directory === "/tmp/repo"),
+    ).toBe(true);
     const response = emitted.find((message) => message.type === "open_project_response") as any;
     expect(response?.payload.error).toBeNull();
     expect(response?.payload.workspace?.id).toBe("/tmp/repo");
@@ -1364,12 +1364,12 @@ describe("workspace aggregation", () => {
       requestId: "req-open-subdir",
     });
 
-    expect(Array.from(workspaces.values()).some((workspace) => workspace.directory === repoRoot)).toBe(
-      true,
-    );
-    expect(Array.from(workspaces.values()).some((workspace) => workspace.directory === subdir)).toBe(
-      false,
-    );
+    expect(
+      Array.from(workspaces.values()).some((workspace) => workspace.directory === repoRoot),
+    ).toBe(true);
+    expect(
+      Array.from(workspaces.values()).some((workspace) => workspace.directory === subdir),
+    ).toBe(false);
     const response = emitted.find((message) => message.type === "open_project_response") as any;
     expect(response?.payload.error).toBeNull();
     expect(response?.payload.workspace?.id).toBe(repoRoot);

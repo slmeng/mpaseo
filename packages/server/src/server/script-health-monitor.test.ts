@@ -6,10 +6,7 @@ import path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { findFreePort, ScriptRouteStore } from "./script-proxy.js";
-import {
-  ScriptHealthMonitor,
-  type ScriptHealthEntry,
-} from "./script-health-monitor.js";
+import { ScriptHealthMonitor, type ScriptHealthEntry } from "./script-health-monitor.js";
 import { spawnWorktreeScripts } from "./worktree-bootstrap.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 
@@ -51,11 +48,7 @@ function createStubTerminalManager(
     async getTerminals() {
       return [];
     },
-    async createTerminal(options: {
-      cwd: string;
-      name?: string;
-      env?: Record<string, string>;
-    }) {
+    async createTerminal(options: { cwd: string; name?: string; env?: Record<string, string> }) {
       createTerminalCalls.push(options);
       return {
         id: `term-${options.name ?? "terminal"}`,

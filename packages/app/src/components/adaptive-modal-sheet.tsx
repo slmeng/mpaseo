@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import type { TextInputProps } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -16,6 +16,7 @@ import {
 import { X } from "lucide-react-native";
 import { FileDropZone } from "@/components/file-drop-zone";
 import type { ImageAttachment } from "@/components/message-input";
+import { isWeb } from "@/constants/platform";
 
 const styles = StyleSheet.create((theme) => ({
   desktopOverlay: {
@@ -143,7 +144,7 @@ export function AdaptiveModalSheet({
   const resolvedSnapPoints = useMemo(() => snapPoints ?? ["65%", "90%"], [snapPoints]);
 
   useEffect(() => {
-    if (isMobile || !visible || Platform.OS !== "web" || typeof window === "undefined") return;
+    if (isMobile || !visible || !isWeb || typeof window === "undefined") return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -253,16 +254,16 @@ export function AdaptiveModalSheet({
       />
       <View style={[styles.desktopCard, desktopMaxWidth != null && { maxWidth: desktopMaxWidth }]}>
         {onFilesDropped ? (
-          <FileDropZone onFilesDropped={onFilesDropped}>
-            {cardInner}
-          </FileDropZone>
-        ) : cardInner}
+          <FileDropZone onFilesDropped={onFilesDropped}>{cardInner}</FileDropZone>
+        ) : (
+          cardInner
+        )}
       </View>
     </View>
   );
 
   // On web, use portal to overlay root for consistent stacking with toasts
-  if (Platform.OS === "web" && typeof document !== "undefined") {
+  if (isWeb && typeof document !== "undefined") {
     if (!visible) return null;
     return createPortal(desktopContent, getOverlayRoot());
   }

@@ -262,23 +262,20 @@ export function AgentList({
     [isActionSheetVisible, onAgentSelect],
   );
 
-  const handleAgentLongPress = useCallback(
-    (agent: AggregatedAgent) => {
-      const isRunning = agent.status === "running" || agent.status === "initializing";
-      if (isRunning) {
-        setActionAgent(agent);
-        return;
-      }
+  const handleAgentLongPress = useCallback((agent: AggregatedAgent) => {
+    const isRunning = agent.status === "running" || agent.status === "initializing";
+    if (isRunning) {
+      setActionAgent(agent);
+      return;
+    }
 
-      const client = useSessionStore.getState().sessions[agent.serverId]?.client ?? null;
-      if (!client) {
-        setActionAgent(agent);
-        return;
-      }
-      void client.archiveAgent(agent.id);
-    },
-    [],
-  );
+    const client = useSessionStore.getState().sessions[agent.serverId]?.client ?? null;
+    if (!client) {
+      setActionAgent(agent);
+      return;
+    }
+    void client.archiveAgent(agent.id);
+  }, []);
 
   const handleCloseActionSheet = useCallback(() => {
     setActionAgent(null);
@@ -288,7 +285,8 @@ export function AgentList({
     if (!actionAgent || !actionClient) {
       return;
     }
-    void actionClient.archiveAgent(actionAgent.id);
+    // Timeout errors are swallowed — the daemon will still process the archive
+    void actionClient.archiveAgent(actionAgent.id).catch(() => {});
     setActionAgent(null);
   }, [actionAgent, actionClient]);
 

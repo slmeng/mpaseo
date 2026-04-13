@@ -123,12 +123,16 @@ export class DbAgentTimelineStore implements AgentTimelineStore {
           ? await this.db
               .select()
               .from(agentTimelineRows)
-              .where(and(eq(agentTimelineRows.agentId, agentId), gt(agentTimelineRows.seq, baseSeq)))
+              .where(
+                and(eq(agentTimelineRows.agentId, agentId), gt(agentTimelineRows.seq, baseSeq)),
+              )
               .orderBy(asc(agentTimelineRows.seq))
           : await this.db
               .select()
               .from(agentTimelineRows)
-              .where(and(eq(agentTimelineRows.agentId, agentId), gt(agentTimelineRows.seq, baseSeq)))
+              .where(
+                and(eq(agentTimelineRows.agentId, agentId), gt(agentTimelineRows.seq, baseSeq)),
+              )
               .orderBy(asc(agentTimelineRows.seq))
               .limit(limit)
       ).map(toTimelineRow);
@@ -159,13 +163,17 @@ export class DbAgentTimelineStore implements AgentTimelineStore {
         ? await this.db
             .select()
             .from(agentTimelineRows)
-            .where(and(eq(agentTimelineRows.agentId, agentId), lt(agentTimelineRows.seq, beforeSeq)))
+            .where(
+              and(eq(agentTimelineRows.agentId, agentId), lt(agentTimelineRows.seq, beforeSeq)),
+            )
             .orderBy(asc(agentTimelineRows.seq))
         : (
             await this.db
               .select()
               .from(agentTimelineRows)
-              .where(and(eq(agentTimelineRows.agentId, agentId), lt(agentTimelineRows.seq, beforeSeq)))
+              .where(
+                and(eq(agentTimelineRows.agentId, agentId), lt(agentTimelineRows.seq, beforeSeq)),
+              )
               .orderBy(desc(agentTimelineRows.seq))
               .limit(limit)
           ).reverse()

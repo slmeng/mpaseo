@@ -251,7 +251,8 @@ describe("importLegacyAgentSnapshots", () => {
     });
 
     const batchLogs = infoSpy.mock.calls.filter(
-      ([context, message]) => message === "Importing agent snapshot batch" && typeof context === "object",
+      ([context, message]) =>
+        message === "Importing agent snapshot batch" && typeof context === "object",
     );
     expect(batchLogs.length).toBeGreaterThan(1);
     expect(batchLogs[0]?.[0]).toMatchObject({

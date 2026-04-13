@@ -184,8 +184,7 @@ export function createScriptProxyMiddleware({
     }
 
     const forwardedHeaders = stripHopByHopHeaders(req.headers);
-    forwardedHeaders["x-forwarded-for"] =
-      req.socket.remoteAddress ?? "127.0.0.1";
+    forwardedHeaders["x-forwarded-for"] = req.socket.remoteAddress ?? "127.0.0.1";
     forwardedHeaders["x-forwarded-host"] = hostHeader.replace(/:\d+$/, "");
     forwardedHeaders["x-forwarded-proto"] = req.protocol;
 
@@ -241,47 +240,41 @@ export function createScriptProxyUpgradeHandler({
       return;
     }
 
-    const targetSocket = net.connect(
-      { host: "127.0.0.1", port: route.port },
-      () => {
-        // Reconstruct the raw HTTP upgrade request to send to the target
-        const forwardedHeaders = stripHopByHopHeaders(req.headers);
-        forwardedHeaders["x-forwarded-for"] =
-          req.socket.remoteAddress ?? "127.0.0.1";
-        forwardedHeaders["x-forwarded-host"] = hostHeader.replace(/:\d+$/, "");
-        forwardedHeaders["x-forwarded-proto"] = "http";
+    const targetSocket = net.connect({ host: "127.0.0.1", port: route.port }, () => {
+      // Reconstruct the raw HTTP upgrade request to send to the target
+      const forwardedHeaders = stripHopByHopHeaders(req.headers);
+      forwardedHeaders["x-forwarded-for"] = req.socket.remoteAddress ?? "127.0.0.1";
+      forwardedHeaders["x-forwarded-host"] = hostHeader.replace(/:\d+$/, "");
+      forwardedHeaders["x-forwarded-proto"] = "http";
 
-        // Re-include upgrade and connection headers — they are required for
-        // WebSocket handshake even though they are hop-by-hop.
-        forwardedHeaders["connection"] = "Upgrade";
-        forwardedHeaders["upgrade"] = req.headers.upgrade ?? "websocket";
+      // Re-include upgrade and connection headers — they are required for
+      // WebSocket handshake even though they are hop-by-hop.
+      forwardedHeaders["connection"] = "Upgrade";
+      forwardedHeaders["upgrade"] = req.headers.upgrade ?? "websocket";
 
-        const headerLines: string[] = [];
-        headerLines.push(
-          `${req.method ?? "GET"} ${req.url ?? "/"} HTTP/${req.httpVersion}`,
-        );
-        for (const [key, value] of Object.entries(forwardedHeaders)) {
-          if (Array.isArray(value)) {
-            for (const v of value) {
-              headerLines.push(`${key}: ${v}`);
-            }
-          } else {
-            headerLines.push(`${key}: ${value}`);
+      const headerLines: string[] = [];
+      headerLines.push(`${req.method ?? "GET"} ${req.url ?? "/"} HTTP/${req.httpVersion}`);
+      for (const [key, value] of Object.entries(forwardedHeaders)) {
+        if (Array.isArray(value)) {
+          for (const v of value) {
+            headerLines.push(`${key}: ${v}`);
           }
+        } else {
+          headerLines.push(`${key}: ${value}`);
         }
-        headerLines.push("\r\n");
+      }
+      headerLines.push("\r\n");
 
-        targetSocket.write(headerLines.join("\r\n"));
+      targetSocket.write(headerLines.join("\r\n"));
 
-        if (head.length > 0) {
-          targetSocket.write(head);
-        }
+      if (head.length > 0) {
+        targetSocket.write(head);
+      }
 
-        // Pipe in both directions
-        targetSocket.pipe(socket);
-        socket.pipe(targetSocket);
-      },
-    );
+      // Pipe in both directions
+      targetSocket.pipe(socket);
+      socket.pipe(targetSocket);
+    });
 
     targetSocket.on("error", (err) => {
       logger.warn(

@@ -67,7 +67,8 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
 
   async insert(record: Omit<TRecord, "id">): Promise<number> {
     await this.load();
-    const nextId = Math.max(0, ...Array.from(this.cache.values(), (value) => this.getId(value))) + 1;
+    const nextId =
+      Math.max(0, ...Array.from(this.cache.values(), (value) => this.getId(value))) + 1;
     const parsed = this.parseRecord({ ...record, id: nextId });
     this.cache.set(String(this.getId(parsed)), parsed);
     await this.enqueuePersist();

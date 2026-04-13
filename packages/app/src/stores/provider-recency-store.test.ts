@@ -46,10 +46,7 @@ describe("provider-recency-store", () => {
     useProviderRecencyStore.getState().recordUsage("opencode");
     useProviderRecencyStore.getState().recordUsage("codex");
 
-    expect(useProviderRecencyStore.getState().recentProviderIds).toEqual([
-      "codex",
-      "opencode",
-    ]);
+    expect(useProviderRecencyStore.getState().recentProviderIds).toEqual(["codex", "opencode"]);
   });
 
   it("filters invalid and duplicate providers during migration", () => {

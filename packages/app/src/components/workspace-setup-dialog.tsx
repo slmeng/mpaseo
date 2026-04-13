@@ -14,9 +14,7 @@ import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { encodeImages } from "@/utils/encode-images";
 import { toErrorMessage } from "@/utils/error-messages";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
-import {
-  requireWorkspaceExecutionAuthority,
-} from "@/utils/workspace-execution";
+import { requireWorkspaceExecutionAuthority } from "@/utils/workspace-execution";
 import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
 import type { ImageAttachment, MessagePayload } from "./message-input";
 
@@ -174,7 +172,9 @@ export function WorkspaceSetupDialog() {
         }
 
         const encodedImages = await encodeImages(images);
-        const workspaceDirectory = requireWorkspaceExecutionAuthority({ workspace }).workspaceDirectory;
+        const workspaceDirectory = requireWorkspaceExecutionAuthority({
+          workspace,
+        }).workspaceDirectory;
         const agent = await connectedClient.createAgent({
           provider: composerState.selectedProvider,
           cwd: workspaceDirectory,
@@ -221,7 +221,6 @@ export function WorkspaceSetupDialog() {
       withConnectedClient,
     ],
   );
-
 
   const workspaceTitle =
     workspace?.name ||

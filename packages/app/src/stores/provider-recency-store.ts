@@ -67,7 +67,9 @@ export function sortProvidersByRecency<T extends { id: string }>(
     .map((entry) => entry.provider);
 }
 
-function migratePersistedState(state: unknown): Pick<ProviderRecencyStoreState, "recentProviderIds"> {
+function migratePersistedState(
+  state: unknown,
+): Pick<ProviderRecencyStoreState, "recentProviderIds"> {
   const record = state as { recentProviderIds?: string[] } | null | undefined;
   return {
     recentProviderIds: sanitizeRecentProviderIds(record?.recentProviderIds),

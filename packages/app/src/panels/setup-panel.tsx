@@ -18,7 +18,7 @@ function useSetupPanelDescriptor(
     serverId: context.serverId,
     workspaceId: target.workspaceId,
   });
-  const snapshot = useWorkspaceSetupStore((state) => (key ? state.snapshots[key] ?? null : null));
+  const snapshot = useWorkspaceSetupStore((state) => (key ? (state.snapshots[key] ?? null) : null));
 
   if (snapshot?.status === "completed") {
     return {
@@ -98,7 +98,7 @@ function SetupPanel() {
     serverId,
     workspaceId: target.workspaceId,
   });
-  const snapshot = useWorkspaceSetupStore((state) => (key ? state.snapshots[key] ?? null : null));
+  const snapshot = useWorkspaceSetupStore((state) => (key ? (state.snapshots[key] ?? null) : null));
   const upsertProgress = useWorkspaceSetupStore((state) => state.upsertProgress);
 
   // On mount, if no snapshot in the store, request cached status from server
@@ -160,13 +160,14 @@ function SetupPanel() {
     return null;
   })();
 
-  const statusLabel = snapshot?.status === "running"
-    ? "Running"
-    : snapshot?.status === "completed"
-      ? "Completed"
-      : snapshot?.status === "failed"
-        ? "Failed"
-        : "Waiting for setup output";
+  const statusLabel =
+    snapshot?.status === "running"
+      ? "Running"
+      : snapshot?.status === "completed"
+        ? "Completed"
+        : snapshot?.status === "failed"
+          ? "Failed"
+          : "Waiting for setup output";
 
   return (
     <ScrollView
@@ -175,10 +176,9 @@ function SetupPanel() {
       testID="workspace-setup-panel"
     >
       {/* Hidden element for status — preserves testID for E2E */}
-      <Text
-        style={styles.hiddenStatus}
-        testID="workspace-setup-status"
-      >{statusLabel}</Text>
+      <Text style={styles.hiddenStatus} testID="workspace-setup-status">
+        {statusLabel}
+      </Text>
 
       {isWaiting ? (
         <View style={styles.waitingContainer}>
@@ -241,17 +241,12 @@ function SetupPanel() {
                     {command.command}
                   </Text>
                   {command.durationMs != null ? (
-                    <Text style={styles.commandDuration}>
-                      {formatDuration(command.durationMs)}
-                    </Text>
+                    <Text style={styles.commandDuration}>{formatDuration(command.durationMs)}</Text>
                   ) : null}
                   <ChevronRight
                     size={14}
                     color={theme.colors.foregroundMuted}
-                    style={[
-                      styles.chevron,
-                      showDetail && styles.chevronExpanded,
-                    ]}
+                    style={[styles.chevron, showDetail && styles.chevronExpanded]}
                   />
                 </Pressable>
                 {showDetail ? (

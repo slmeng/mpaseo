@@ -1,10 +1,7 @@
 import { existsSync } from "node:fs";
 import { expect, test } from "./fixtures";
 import { createTempGitRepo } from "./helpers/workspace";
-import {
-  clickTerminal,
-  waitForTabBar,
-} from "./helpers/launcher";
+import { clickTerminal, waitForTabBar } from "./helpers/launcher";
 import {
   connectWorkspaceSetupClient,
   createWorkspaceThroughDaemon,
@@ -82,15 +79,11 @@ test.describe("Workspace setup runtime authority", () => {
 
       // Verify terminal is listed under the worktree directory, not the original repo
       await expect
-        .poll(
-          async () =>
-            (await client.listTerminals(workspaceDir)).terminals.length > 0,
-          { timeout: 30_000 },
-        )
+        .poll(async () => (await client.listTerminals(workspaceDir)).terminals.length > 0, {
+          timeout: 30_000,
+        })
         .toBe(true);
-      expect(
-        (await client.listTerminals(repo.path)).terminals.length,
-      ).toBe(0);
+      expect((await client.listTerminals(repo.path)).terminals.length).toBe(0);
     } finally {
       await client.close();
       await repo.cleanup();

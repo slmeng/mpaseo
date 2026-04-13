@@ -5,7 +5,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import type { PersistedProjectRecord, PersistedWorkspaceRecord } from "../workspace-registry.js";
-import { createPersistedProjectRecord, createPersistedWorkspaceRecord } from "../workspace-registry.js";
+import {
+  createPersistedProjectRecord,
+  createPersistedWorkspaceRecord,
+} from "../workspace-registry.js";
 import { openPaseoDatabase, type PaseoDatabaseHandle } from "./sqlite-database.js";
 import { DbProjectRegistry } from "./db-project-registry.js";
 import { DbWorkspaceRegistry } from "./db-workspace-registry.js";
@@ -24,7 +27,9 @@ function createProjectRecord(input: Partial<PersistedProjectRecord> = {}): Persi
   });
 }
 
-function createWorkspaceRecord(input: Partial<PersistedWorkspaceRecord> = {}): PersistedWorkspaceRecord {
+function createWorkspaceRecord(
+  input: Partial<PersistedWorkspaceRecord> = {},
+): PersistedWorkspaceRecord {
   return createPersistedWorkspaceRecord({
     id: 1,
     projectId: 1,

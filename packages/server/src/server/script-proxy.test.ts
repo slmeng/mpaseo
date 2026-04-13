@@ -253,9 +253,7 @@ describe("HTTP proxy", () => {
       res.end("upstream-ok");
     });
 
-    await new Promise<void>((resolve) =>
-      server.listen(port, "127.0.0.1", resolve),
-    );
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
     servers.push(server);
 
     return {
@@ -281,9 +279,7 @@ describe("HTTP proxy", () => {
     }
 
     const server = http.createServer(app);
-    await new Promise<void>((resolve) =>
-      server.listen(port, "127.0.0.1", resolve),
-    );
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
     servers.push(server);
 
     return { port, server };
@@ -296,16 +292,11 @@ describe("HTTP proxy", () => {
     path = "/",
   ): Promise<{ status: number; body: string }> {
     return new Promise((resolve, reject) => {
-      const req = http.get(
-        { hostname: "127.0.0.1", port, path, headers: { host } },
-        (res) => {
-          let body = "";
-          res.on("data", (chunk: Buffer) => (body += chunk.toString()));
-          res.on("end", () =>
-            resolve({ status: res.statusCode ?? 0, body }),
-          );
-        },
-      );
+      const req = http.get({ hostname: "127.0.0.1", port, path, headers: { host } }, (res) => {
+        let body = "";
+        res.on("data", (chunk: Buffer) => (body += chunk.toString()));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      });
       req.on("error", reject);
     });
   }
@@ -316,10 +307,7 @@ describe("HTTP proxy", () => {
     routeStore.addRoute("test-service.localhost", upstream.port);
 
     const proxy = await startProxy(routeStore);
-    const res = await httpGet(
-      proxy.port,
-      `test-service.localhost:${proxy.port}`,
-    );
+    const res = await httpGet(proxy.port, `test-service.localhost:${proxy.port}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toBe("upstream-ok");
@@ -333,10 +321,7 @@ describe("HTTP proxy", () => {
     const routeStore = new ScriptRouteStore();
     const proxy = await startProxy(routeStore, { fallback: true });
 
-    const res = await httpGet(
-      proxy.port,
-      `unknown.localhost:${proxy.port}`,
-    );
+    const res = await httpGet(proxy.port, `unknown.localhost:${proxy.port}`);
 
     expect(res.status).toBe(404);
     expect(res.body).toBe("no route");
@@ -350,10 +335,7 @@ describe("HTTP proxy", () => {
     routeStore.addRoute("dead-service.localhost", deadPort);
 
     const proxy = await startProxy(routeStore);
-    const res = await httpGet(
-      proxy.port,
-      `dead-service.localhost:${proxy.port}`,
-    );
+    const res = await httpGet(proxy.port, `dead-service.localhost:${proxy.port}`);
 
     expect(res.status).toBe(502);
     expect(res.body).toBe("502 Bad Gateway");
@@ -397,9 +379,7 @@ describe("WebSocket proxy", () => {
       });
     });
 
-    await new Promise<void>((resolve) =>
-      upstreamServer.listen(upstreamPort, "127.0.0.1", resolve),
-    );
+    await new Promise<void>((resolve) => upstreamServer.listen(upstreamPort, "127.0.0.1", resolve));
     httpServers.push(upstreamServer);
 
     // 2. Create the proxy server with the upgrade handler
@@ -418,9 +398,7 @@ describe("WebSocket proxy", () => {
     });
     proxyServer.on("upgrade", upgradeHandler);
 
-    await new Promise<void>((resolve) =>
-      proxyServer.listen(proxyPort, "127.0.0.1", resolve),
-    );
+    await new Promise<void>((resolve) => proxyServer.listen(proxyPort, "127.0.0.1", resolve));
     httpServers.push(proxyServer);
 
     // 3. Connect a WebSocket client through the proxy
@@ -469,9 +447,7 @@ describe("findFreePort", () => {
 
     const addr = server.address();
     expect(addr).not.toBeNull();
-    expect(typeof addr === "object" && addr !== null ? addr.port : -1).toBe(
-      port,
-    );
+    expect(typeof addr === "object" && addr !== null ? addr.port : -1).toBe(port);
 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });

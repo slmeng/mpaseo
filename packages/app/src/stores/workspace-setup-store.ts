@@ -33,10 +33,7 @@ interface WorkspaceSetupStoreState {
   clearServer: (serverId: string) => void;
 }
 
-function buildWorkspaceSetupKey(input: {
-  serverId: string;
-  workspaceId: string;
-}): string | null {
+function buildWorkspaceSetupKey(input: { serverId: string; workspaceId: string }): string | null {
   return buildWorkspaceTabPersistenceKey(input);
 }
 

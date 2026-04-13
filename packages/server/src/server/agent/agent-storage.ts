@@ -185,8 +185,7 @@ export class AgentStorage implements AgentSnapshotStore {
     workspaceIdOrOptions?: number | { title?: string | null; internal?: boolean },
     options?: { title?: string | null; internal?: boolean },
   ): Promise<void> {
-    const nextOptions =
-      typeof workspaceIdOrOptions === "number" ? options : workspaceIdOrOptions;
+    const nextOptions = typeof workspaceIdOrOptions === "number" ? options : workspaceIdOrOptions;
     await this.load();
     await this.waitForPendingWrite(agent.id);
     const existing = (await this.get(agent.id)) ?? null;
@@ -197,7 +196,9 @@ export class AgentStorage implements AgentSnapshotStore {
     const record = toStoredAgentRecord(agent, {
       title: hasTitleOverride ? (nextOptions?.title ?? null) : (existing?.title ?? null),
       createdAt: existing?.createdAt,
-      internal: hasInternalOverride ? nextOptions?.internal : (agent.internal ?? existing?.internal),
+      internal: hasInternalOverride
+        ? nextOptions?.internal
+        : (agent.internal ?? existing?.internal),
     });
 
     // Preserve soft-delete/archive status across snapshot flushes.

@@ -4,17 +4,17 @@ import {
   Text,
   TextInput,
   Pressable,
-  Platform,
   ActivityIndicator,
   type GestureResponderEvent,
 } from "react-native";
 import { BottomSheetTextInput } from "@gorhom/bottom-sheet";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isWeb as platformIsWeb } from "@/constants/platform";
 import { ArrowLeft, ChevronDown, ChevronRight, Search, Star } from "lucide-react-native";
 import type { AgentModelDefinition, AgentProvider } from "@server/server/agent/agent-sdk-types";
 import type { AgentProviderDefinition } from "@server/server/agent/provider-manifest";
-const IS_WEB = Platform.OS === "web";
+const IS_WEB = platformIsWeb;
 
 import { Combobox, ComboboxItem } from "@/components/ui/combobox";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -349,7 +349,7 @@ function ProviderSearchInput({
   const InputComponent = isMobile ? BottomSheetTextInput : TextInput;
 
   useEffect(() => {
-    if (autoFocus && Platform.OS === "web" && inputRef.current) {
+    if (autoFocus && platformIsWeb && inputRef.current) {
       const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 50);
@@ -363,7 +363,7 @@ function ProviderSearchInput({
       <InputComponent
         ref={inputRef as any}
         // @ts-expect-error - outlineStyle is web-only
-        style={[styles.providerSearchInput, Platform.OS === "web" && { outlineStyle: "none" }]}
+        style={[styles.providerSearchInput, platformIsWeb && { outlineStyle: "none" }]}
         placeholder="Search models..."
         placeholderTextColor={theme.colors.foregroundMuted}
         value={value}
@@ -518,10 +518,9 @@ export function CombinedModelSelector({
   disabled = false,
 }: CombinedModelSelectorProps) {
   const { theme } = useUnistyles();
-  const isWeb = Platform.OS === "web";
   const anchorRef = useRef<View>(null);
   const [isOpen, setIsOpen] = useState(false);
-  const [isContentReady, setIsContentReady] = useState(isWeb);
+  const [isContentReady, setIsContentReady] = useState(platformIsWeb);
   const [view, setView] = useState<SelectorView>({ kind: "all" });
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -601,7 +600,7 @@ export function CombinedModelSelector({
   }, [selectedModelLabel]);
 
   useEffect(() => {
-    if (isWeb) {
+    if (platformIsWeb) {
       return;
     }
 
@@ -615,7 +614,7 @@ export function CombinedModelSelector({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [isOpen, isWeb]);
+  }, [isOpen, platformIsWeb]);
 
   return (
     <>
@@ -678,7 +677,7 @@ export function CombinedModelSelector({
               <ProviderSearchInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                autoFocus={Platform.OS === "web"}
+                autoFocus={platformIsWeb}
               />
             </View>
           ) : undefined
@@ -793,8 +792,7 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
-  level2Header: {
-  },
+  level2Header: {},
   backButton: {
     flexDirection: "row",
     alignItems: "center",

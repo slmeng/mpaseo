@@ -104,7 +104,10 @@ describe("DbAgentTimelineStore", () => {
   });
 
   test("fetchCommitted tail returns the last N rows", async () => {
-    await store.bulkInsert("agent-1", [1, 2, 3, 4, 5].map((seq) => createRow(seq)));
+    await store.bulkInsert(
+      "agent-1",
+      [1, 2, 3, 4, 5].map((seq) => createRow(seq)),
+    );
 
     await expect(
       store.fetchCommitted("agent-1", {
@@ -125,7 +128,10 @@ describe("DbAgentTimelineStore", () => {
   });
 
   test("fetchCommitted after-cursor returns rows after a given seq", async () => {
-    await store.bulkInsert("agent-1", [1, 2, 3, 4, 5].map((seq) => createRow(seq)));
+    await store.bulkInsert(
+      "agent-1",
+      [1, 2, 3, 4, 5].map((seq) => createRow(seq)),
+    );
 
     await expect(
       store.fetchCommitted("agent-1", {
@@ -147,7 +153,10 @@ describe("DbAgentTimelineStore", () => {
   });
 
   test("fetchCommitted before-cursor returns rows before a given seq", async () => {
-    await store.bulkInsert("agent-1", [1, 2, 3, 4, 5].map((seq) => createRow(seq)));
+    await store.bulkInsert(
+      "agent-1",
+      [1, 2, 3, 4, 5].map((seq) => createRow(seq)),
+    );
 
     await expect(
       store.fetchCommitted("agent-1", {

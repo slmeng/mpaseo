@@ -27,7 +27,10 @@ import type { AllowedHostsConfig } from "./allowed-hosts.js";
 import { isHostAllowed } from "./allowed-hosts.js";
 import { Session, type SessionLifecycleIntent, type SessionRuntimeMetrics } from "./session.js";
 import type { AgentProvider } from "./agent/agent-sdk-types.js";
-import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
+import type {
+  AgentProviderRuntimeSettingsMap,
+  ProviderOverride,
+} from "./agent/provider-launch-config.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { buildProviderRegistry } from "./agent/provider-registry.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
@@ -251,15 +254,14 @@ export class VoiceAssistantWebSocketServer {
   private readonly scriptRuntimeStore: WorkspaceScriptRuntimeStore | null;
   private readonly getDaemonTcpPort: (() => number | null) | null;
   private readonly getDaemonTcpHost: (() => string | null) | null;
-  private readonly resolveScriptHealth:
-    | ((hostname: string) => ScriptHealthState | null)
-    | null;
+  private readonly resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | null;
   private readonly dictation: {
     finalTimeoutMs?: number;
   } | null;
   private readonly voiceSpeakHandlers = new Map<string, VoiceSpeakHandler>();
   private readonly voiceCallerContexts = new Map<string, VoiceCallerContext>();
   private readonly agentProviderRuntimeSettings: AgentProviderRuntimeSettingsMap | undefined;
+  private readonly providerOverrides: Record<string, ProviderOverride> | undefined;
   private readonly providerSnapshotManager: ProviderSnapshotManager;
   private readonly onLifecycleIntent: ((intent: SessionLifecycleIntent) => void) | null;
   private readonly onBranchChanged:
@@ -308,6 +310,7 @@ export class VoiceAssistantWebSocketServer {
       finalTimeoutMs?: number;
     },
     agentProviderRuntimeSettings?: AgentProviderRuntimeSettingsMap,
+    providerOverrides?: Record<string, ProviderOverride>,
     daemonVersion?: string,
     onLifecycleIntent?: (intent: SessionLifecycleIntent) => void,
     projectRegistry?: ProjectRegistry,
@@ -365,10 +368,12 @@ export class VoiceAssistantWebSocketServer {
     this.terminalManager = terminalManager ?? null;
     this.dictation = dictation ?? null;
     this.agentProviderRuntimeSettings = agentProviderRuntimeSettings;
+    this.providerOverrides = providerOverrides;
     const providerSnapshotLogger = this.logger.child({ module: "provider-snapshot-manager" });
     this.providerSnapshotManager = new ProviderSnapshotManager(
       buildProviderRegistry(providerSnapshotLogger, {
         runtimeSettings: this.agentProviderRuntimeSettings,
+        providerOverrides: this.providerOverrides,
       }),
       providerSnapshotLogger,
     );
@@ -720,6 +725,7 @@ export class VoiceAssistantWebSocketServer {
             }
           : undefined,
       agentProviderRuntimeSettings: this.agentProviderRuntimeSettings,
+      providerOverrides: this.providerOverrides,
     });
 
     connection = {

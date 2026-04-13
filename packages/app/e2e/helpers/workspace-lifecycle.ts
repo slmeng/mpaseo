@@ -1,8 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import {
-  clickNewChat,
-  clickTerminal,
-} from "./launcher";
+import { clickNewChat, clickTerminal } from "./launcher";
 import { setupDeterministicPrompt, waitForTerminalContent } from "./terminal-perf";
 
 function terminalSurface(page: Page) {

@@ -45,17 +45,21 @@ async function expectScriptInCard(page: Page, scriptName: string): Promise<void>
 /** Asserts the script status dot indicates "running". */
 async function expectScriptRunning(page: Page, scriptName: string): Promise<void> {
   const card = page.getByTestId("workspace-hover-card");
-  await expect(
-    card.getByTestId(`hover-card-script-status-${scriptName}`),
-  ).toHaveAttribute("aria-label", "Running", { timeout: 10_000 });
+  await expect(card.getByTestId(`hover-card-script-status-${scriptName}`)).toHaveAttribute(
+    "aria-label",
+    "Running",
+    { timeout: 10_000 },
+  );
 }
 
 /** Asserts the script lifecycle is stopped. */
 async function expectScriptStopped(page: Page, scriptName: string): Promise<void> {
   const card = page.getByTestId("workspace-hover-card");
-  await expect(
-    card.getByTestId(`hover-card-script-status-${scriptName}`),
-  ).toHaveAttribute("aria-label", "Stopped", { timeout: 10_000 });
+  await expect(card.getByTestId(`hover-card-script-status-${scriptName}`)).toHaveAttribute(
+    "aria-label",
+    "Stopped",
+    { timeout: 10_000 },
+  );
 }
 
 /** Asserts the script health label shown in the hover card. */
@@ -117,7 +121,8 @@ test.describe("Workspace hover card", () => {
       // Wait for setup completion via daemon (setup snapshots are per-session)
       const completed = waitForWorkspaceSetupProgress(
         client,
-        (payload) => payload.status === "completed" && payload.detail.log.includes("setup complete"),
+        (payload) =>
+          payload.status === "completed" && payload.detail.log.includes("setup complete"),
       );
       const workspace = await createWorkspaceThroughDaemon(client, {
         cwd: repo.path,
@@ -182,7 +187,9 @@ test.describe("Workspace hover card", () => {
       }
 
       await openHomeWithProject(page, repo.path);
-      const wsRow = page.getByTestId(`sidebar-workspace-row-${getServerId()}:${workspace.workspace.id}`);
+      const wsRow = page.getByTestId(
+        `sidebar-workspace-row-${getServerId()}:${workspace.workspace.id}`,
+      );
       await expect(wsRow).toBeVisible({ timeout: 30_000 });
 
       await expectHoverCard(page, workspace.workspace.name);

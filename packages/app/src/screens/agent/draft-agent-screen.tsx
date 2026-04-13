@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createNameId } from "mnemonic-id";
 import type { ImageAttachment } from "@/components/message-input";
-import { View, Text, Pressable, ScrollView, Keyboard, Platform } from "react-native";
+import { View, Text, Pressable, ScrollView, Keyboard } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -57,6 +57,8 @@ import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
 import { useDraftAgentCreateFlow } from "@/hooks/use-draft-agent-create-flow";
+import { useDraftAgentFeatures } from "@/hooks/use-draft-agent-features";
+import { isWeb } from "@/constants/platform";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
 const DRAFT_CAPABILITIES: AgentCapabilityFlags = {
@@ -67,10 +69,6 @@ const DRAFT_CAPABILITIES: AgentCapabilityFlags = {
   supportsReasoningStream: false,
   supportsToolInvocations: false,
 };
-const PROVIDER_DEFINITION_MAP = new Map(
-  AGENT_PROVIDER_DEFINITIONS.map((definition) => [definition.id, definition]),
-);
-
 function getParamValue(value: string | string[] | undefined) {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -91,16 +89,14 @@ function getValidProvider(value: string | undefined) {
   if (!value) {
     return undefined;
   }
-  return PROVIDER_DEFINITION_MAP.has(value as AgentProvider) ? (value as AgentProvider) : undefined;
+  return value as AgentProvider;
 }
 
 function getValidMode(provider: AgentProvider | undefined, value: string | undefined) {
   if (!provider || !value) {
     return undefined;
   }
-  const definition = PROVIDER_DEFINITION_MAP.get(provider);
-  const modes = definition?.modes ?? [];
-  return modes.some((mode) => mode.id === value) ? value : undefined;
+  return value;
 }
 
 type DraftAgentParams = {
@@ -205,22 +201,20 @@ function DraftAgentScreenContent({
 
   const draftIdRef = useRef(generateDraftId());
   const draftAgentIdRef = useRef(generateDraftId());
-  const draftInput = useAgentInputDraft(
-    {
-      draftKey: ({ selectedServerId }) =>
-        buildDraftStoreKey({
-          serverId: selectedServerId ?? "",
-          agentId: draftAgentIdRef.current,
-          draftId: draftIdRef.current,
-        }),
-      composer: {
-        initialServerId: resolvedServerId ?? null,
-        initialValues,
-        isVisible,
-        onlineServerIds,
-      },
+  const draftInput = useAgentInputDraft({
+    draftKey: ({ selectedServerId }) =>
+      buildDraftStoreKey({
+        serverId: selectedServerId ?? "",
+        agentId: draftAgentIdRef.current,
+        draftId: draftIdRef.current,
+      }),
+    composer: {
+      initialServerId: resolvedServerId ?? null,
+      initialValues,
+      isVisible,
+      onlineServerIds,
     },
-  );
+  });
   const composerState = draftInput.composerState;
   if (!composerState) {
     throw new Error("Draft agent composer state is required");
@@ -636,7 +630,9 @@ function DraftAgentScreenContent({
     useCallback(
       (state) =>
         resolveWorkspaceIdByExecutionDirectory({
-          workspaces: selectedServerId ? state.sessions[selectedServerId]?.workspaces?.values() : null,
+          workspaces: selectedServerId
+            ? state.sessions[selectedServerId]?.workspaces?.values()
+            : null,
           workspaceDirectory: explorerCwd,
         }),
       [explorerCwd, selectedServerId],
@@ -802,7 +798,7 @@ function DraftAgentScreenContent({
     },
     onBeforeSubmit: () => {
       void persistFormPreferences();
-      if (Platform.OS === "web") {
+      if (isWeb) {
         (document.activeElement as HTMLElement | null)?.blur?.();
       }
       Keyboard.dismiss();
@@ -868,9 +864,7 @@ function DraftAgentScreenContent({
         cwd: resolvedWorkingDir,
         ...(modeId ? { modeId } : {}),
         ...(effectiveModelId ? { model: effectiveModelId } : {}),
-        ...(effectiveThinkingOptionId
-          ? { thinkingOptionId: effectiveThinkingOptionId }
-          : {}),
+        ...(effectiveThinkingOptionId ? { thinkingOptionId: effectiveThinkingOptionId } : {}),
       };
 
       const effectiveBaseBranch = baseBranch.trim();
@@ -932,9 +926,7 @@ function DraftAgentScreenContent({
     },
     onCreateSuccess: ({ result }) => {
       if (!result.workspaceId) {
-        router.replace(
-          buildHostAgentDetailRoute(selectedServerId as string, result.id) as any,
-        );
+        router.replace(buildHostAgentDetailRoute(selectedServerId as string, result.id) as any);
         return;
       }
       const route = prepareWorkspaceTab({

@@ -117,7 +117,6 @@ export async function clickTerminal(page: Page): Promise<void> {
   await button.click();
 }
 
-
 // ─── Tab title assertions ──────────────────────────────────────────────────
 
 /** Wait for any tab in the bar to display the given title text. */
@@ -188,6 +187,8 @@ export async function sampleTabsDuringTransition(
 // ─── Workspace setup ───────────────────────────────────────────────────────
 
 /** Create a temp git repo and return its path with a cleanup function. */
-export async function createWorkspace(prefix = "launcher-e2e-"): ReturnType<typeof createTempGitRepo> {
+export async function createWorkspace(
+  prefix = "launcher-e2e-",
+): ReturnType<typeof createTempGitRepo> {
   return createTempGitRepo(prefix);
 }

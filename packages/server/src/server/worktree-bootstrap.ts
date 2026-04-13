@@ -1,11 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
 import type { Logger } from "pino";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import { sep } from "node:path";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import type { TerminalSession } from "../terminal/terminal.js";
 import { buildScriptHostname } from "../utils/script-hostname.js";
+import { runGitCommand } from "../utils/run-git-command.js";
 import {
   createWorktree,
   getScriptConfigs,
@@ -62,7 +61,7 @@ const READ_ONLY_GIT_ENV: NodeJS.ProcessEnv = {
   ...process.env,
   GIT_OPTIONAL_LOCKS: "0",
 };
-const execAsync = promisify(exec);
+
 type MiddleTruncationAccumulator = {
   totalBytes: number;
   head: string;
@@ -214,7 +213,7 @@ async function findExistingPaseoWorktreeBySlug(options: CreateAgentWorktreeOptio
 }
 
 async function resolveBranchNameForWorktreePath(worktreePath: string): Promise<string> {
-  const { stdout } = await execAsync("git branch --show-current", {
+  const { stdout } = await runGitCommand(["branch", "--show-current"], {
     cwd: worktreePath,
     env: READ_ONLY_GIT_ENV,
   });
@@ -877,7 +876,13 @@ export async function spawnWorkspaceScript(
     terminal.send({ type: "input", data: `${config.command}\r` });
 
     logger?.info(
-      { scriptName, hostname, port, terminalId: terminal.id, type: serviceScript ? "service" : "script" },
+      {
+        scriptName,
+        hostname,
+        port,
+        terminalId: terminal.id,
+        type: serviceScript ? "service" : "script",
+      },
       serviceScript
         ? `Registered script proxy: ${hostname} -> 127.0.0.1:${port}`
         : "Started workspace script",

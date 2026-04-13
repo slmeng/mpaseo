@@ -1,8 +1,7 @@
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
-import { watch, type FSWatcher } from "node:fs";
-import { readFile, stat } from "fs/promises";
-import { exec, execFile } from "node:child_process";
+import type { FSWatcher } from "node:fs";
+import { exec } from "node:child_process";
 import { promisify } from "util";
 import { resolve, sep } from "path";
 import { homedir } from "node:os";
@@ -63,24 +62,22 @@ import {
   createVoiceTurnController,
   type VoiceTurnController,
 } from "./voice/voice-turn-controller.js";
-import {
-  toAgentPersistenceHandle,
-} from "./persistence-hooks.js";
 import { experimental_createMCPClient } from "ai";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { VoiceCallerContext, VoiceMcpStdioConfig, VoiceSpeakHandler } from "./voice-types.js";
+import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
 import { buildWorkspaceScriptPayloads } from "./script-status-projection.js";
 import type { ScriptHealthState } from "./script-health-monitor.js";
 import { spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import { readGitCommand } from "./workspace-git-metadata.js";
-import { BackgroundGitFetchManager } from "./background-git-fetch-manager.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import type { DaemonConfigStore } from "./daemon-config-store.js";
 import type { WorkspaceGitRuntimeSnapshot, WorkspaceGitService } from "./workspace-git-service.js";
 
 import { buildProviderRegistry } from "./agent/provider-registry.js";
-import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
+import type {
+  AgentProviderRuntimeSettingsMap,
+  ProviderOverride,
+} from "./agent/provider-launch-config.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import type {
@@ -114,7 +111,7 @@ import type {
 } from "./agent/agent-sdk-types.js";
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
 import type { AgentSnapshotStore } from "./agent/agent-snapshot-store.js";
-import { isValidAgentProvider, AGENT_PROVIDER_IDS } from "./agent/provider-manifest.js";
+import { AGENT_PROVIDER_IDS } from "./agent/provider-manifest.js";
 import { normalizeWorkspaceId as normalizePersistedWorkspaceId } from "./workspace-registry-model.js";
 import type {
   PersistedProjectRecord,
@@ -151,7 +148,6 @@ import {
   pullCurrentBranch,
   pushCurrentBranch,
   createPullRequest,
-  getPullRequestStatus,
   searchGitHubIssuesAndPrs,
   warmCheckoutShortstatInBackground,
 } from "../utils/checkout-git.js";
@@ -170,10 +166,11 @@ import { ChatServiceError, FileBackedChatService } from "./chat/chat-service.js"
 import { notifyChatMentions } from "./chat/chat-mentions.js";
 import { LoopService } from "./loop-service.js";
 import { ScheduleService } from "./schedule/service.js";
+import { execCommand } from "../utils/spawn.js";
 import {
   assertSafeGitRef as assertWorktreeSafeGitRef,
   buildAgentSessionConfig as buildWorktreeAgentSessionConfig,
-  createPaseoWorktreeInBackground as createWorktreeInBackgroundSession,
+  runWorktreeSetupInBackground as runWorktreeSetupInBackgroundSession,
   handleCreatePaseoWorktreeRequest as handleCreateWorktreeRequest,
   handlePaseoWorktreeArchiveRequest as handleWorktreeArchiveRequest,
   handlePaseoWorktreeListRequest as handleWorktreeListRequest,
@@ -182,9 +179,14 @@ import {
 } from "./worktree-session.js";
 
 const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
 const MAX_INITIAL_AGENT_TITLE_CHARS = Math.min(60, MAX_EXPLICIT_AGENT_TITLE_CHARS);
+const pendingAgentInitializations = new Map<string, Promise<ManagedAgent>>();
 const DEFAULT_AGENT_PROVIDER = AGENT_PROVIDER_IDS[0];
+const WORKSPACE_GIT_WATCH_REMOVED_FINGERPRINT = "__removed__";
+
+// TODO: Remove once all app store clients are on >=0.1.45 and understand arbitrary provider strings.
+// Clients before 0.1.45 validate providers with z.enum(["claude", "codex", "opencode"]) and reject
+// the entire session message if they encounter an unknown provider.
 const LEGACY_PROVIDER_IDS = new Set(["claude", "codex", "opencode"]);
 const MIN_VERSION_ALL_PROVIDERS = "0.1.45";
 const MIN_VERSION_FLEXIBLE_EDITOR_IDS = "0.1.50";
@@ -213,19 +215,16 @@ function clientSupportsFlexibleEditorIds(appVersion: string | null): boolean {
 }
 
 const MAX_TERMINAL_STREAM_SLOTS = 256;
-const pendingAgentInitializations = new Map<string, Promise<ManagedAgent>>();
 
 type DeleteFencedAgentSnapshotStore = AgentSnapshotStore & {
   beginDelete(agentId: string): void;
 };
-
 
 function beginAgentDeleteIfSupported(agentStorage: AgentSnapshotStore, agentId: string): void {
   if ("beginDelete" in agentStorage && typeof agentStorage.beginDelete === "function") {
     (agentStorage as DeleteFencedAgentSnapshotStore).beginDelete(agentId);
   }
 }
-
 
 function deriveInitialAgentTitle(prompt: string): string | null {
   const firstContentLine = prompt
@@ -382,6 +381,16 @@ interface AudioBufferState {
   totalPCMBytes: number;
 }
 
+// Stub types for features under development (modules not yet available)
+type BackgroundGitFetchManager = {
+  subscribe(
+    opts: { repoGitRoot: string; cwd: string },
+    callback: () => void,
+  ): Promise<{ unsubscribe: () => void }>;
+};
+
+type AgentMcpTransportFactory = () => Promise<unknown>;
+
 type VoiceTranscriptionResultPayload = {
   text: string;
   requestId: string;
@@ -413,8 +422,8 @@ export type SessionOptions = {
   loopService: LoopService;
   checkoutDiffManager: CheckoutDiffManager;
   agentLoadingService?: AgentLoadingService;
-  backgroundGitFetchManager: BackgroundGitFetchManager;
-  createAgentMcpTransport: AgentMcpTransportFactory;
+  backgroundGitFetchManager?: BackgroundGitFetchManager;
+  createAgentMcpTransport?: AgentMcpTransportFactory;
   workspaceGitService: WorkspaceGitService;
   daemonConfigStore: DaemonConfigStore;
   mcpBaseUrl?: string | null;
@@ -447,6 +456,7 @@ export type SessionOptions = {
     getSpeechReadiness?: () => SpeechReadinessSnapshot;
   };
   agentProviderRuntimeSettings?: AgentProviderRuntimeSettingsMap;
+  providerOverrides?: Record<string, ProviderOverride>;
 };
 
 export type SessionLifecycleIntent =
@@ -518,8 +528,20 @@ function convertPCMToWavBuffer(
   return wavBuffer;
 }
 
-function coerceAgentProvider(logger: pino.Logger, value: string, agentId?: string): AgentProvider {
-  if (isValidAgentProvider(value)) {
+function isRegisteredProvider(
+  providerRegistry: ReturnType<typeof buildProviderRegistry>,
+  value: string,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(providerRegistry, value);
+}
+
+function coerceAgentProvider(
+  logger: pino.Logger,
+  providerRegistry: ReturnType<typeof buildProviderRegistry>,
+  value: string,
+  agentId?: string,
+): AgentProvider {
+  if (isRegisteredProvider(providerRegistry, value)) {
     return value;
   }
   logger.warn(
@@ -527,6 +549,31 @@ function coerceAgentProvider(logger: pino.Logger, value: string, agentId?: strin
     `Unknown provider '${value}' for agent ${agentId ?? "unknown"}; defaulting to '${DEFAULT_AGENT_PROVIDER}'`,
   );
   return DEFAULT_AGENT_PROVIDER;
+}
+
+function toAgentPersistenceHandle(
+  logger: pino.Logger,
+  providerRegistry: ReturnType<typeof buildProviderRegistry>,
+  handle: StoredAgentRecord["persistence"],
+): AgentPersistenceHandle | null {
+  if (!handle) {
+    return null;
+  }
+  const provider = handle.provider;
+  if (!isRegisteredProvider(providerRegistry, provider)) {
+    logger.warn({ provider }, `Ignoring persistence handle with unknown provider '${provider}'`);
+    return null;
+  }
+  if (!handle.sessionId) {
+    logger.warn("Ignoring persistence handle missing sessionId");
+    return null;
+  }
+  return {
+    provider,
+    sessionId: handle.sessionId,
+    nativeHandle: handle.nativeHandle,
+    metadata: handle.metadata,
+  } satisfies AgentPersistenceHandle;
 }
 
 /**
@@ -585,8 +632,6 @@ export class Session {
   private readonly loopService: LoopService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly agentLoadingService: AgentLoadingService;
-  private readonly backgroundGitFetchManager: BackgroundGitFetchManager;
-  private readonly createAgentMcpTransport: AgentMcpTransportFactory;
   private readonly workspaceGitService: WorkspaceGitService;
   private readonly daemonConfigStore: DaemonConfigStore;
   private readonly mcpBaseUrl: string | null;
@@ -616,9 +661,7 @@ export class Session {
   ) => void;
   private readonly getDaemonTcpPort: (() => number | null) | null;
   private readonly getDaemonTcpHost: (() => string | null) | null;
-  private readonly resolveScriptHealth:
-    | ((hostname: string) => ScriptHealthState | null)
-    | null;
+  private readonly resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | null;
   private readonly subscribedTerminalDirectories = new Set<string>();
   private unsubscribeTerminalsChanged: (() => void) | null = null;
   private terminalExitSubscriptions: Map<string, () => void> = new Map();
@@ -631,7 +674,6 @@ export class Session {
   private readonly workspaceGitWatchTargets = new Map<string, WorkspaceGitWatchTarget>();
   private readonly workspaceSetupSnapshots = new Map<string, WorkspaceSetupSnapshot>();
   private readonly workspaceGitFetchSubscriptions = new Map<string, () => void>();
-  private readonly voiceAgentMcpStdio: VoiceMcpStdioConfig | null;
   private readonly workspaceGitSubscriptions = new Map<string, () => void>();
   private readonly registerVoiceSpeakHandler?: (
     agentId: string,
@@ -645,6 +687,7 @@ export class Session {
   private readonly unregisterVoiceCallerContext?: (agentId: string) => void;
   private readonly getSpeechReadiness?: () => SpeechReadinessSnapshot;
   private readonly agentProviderRuntimeSettings: AgentProviderRuntimeSettingsMap | undefined;
+  private readonly providerOverrides: Record<string, ProviderOverride> | undefined;
   private voiceModeAgentId: string | null = null;
   private voiceModeBaseConfig: VoiceModeBaseConfig | null = null;
 
@@ -668,8 +711,6 @@ export class Session {
       loopService,
       checkoutDiffManager,
       agentLoadingService,
-      backgroundGitFetchManager,
-      createAgentMcpTransport,
       workspaceGitService,
       daemonConfigStore,
       mcpBaseUrl,
@@ -687,6 +728,7 @@ export class Session {
       voiceBridge,
       dictation,
       agentProviderRuntimeSettings,
+      providerOverrides,
     } = options;
     this.clientId = clientId;
     this.appVersion = appVersion ?? null;
@@ -717,8 +759,6 @@ export class Session {
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
       });
-    this.backgroundGitFetchManager = backgroundGitFetchManager;
-    this.createAgentMcpTransport = createAgentMcpTransport;
     this.workspaceGitService = workspaceGitService;
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl ?? null;
@@ -762,9 +802,11 @@ export class Session {
     this.unregisterVoiceCallerContext = voiceBridge?.unregisterVoiceCallerContext;
     this.getSpeechReadiness = dictation?.getSpeechReadiness;
     this.agentProviderRuntimeSettings = agentProviderRuntimeSettings;
+    this.providerOverrides = providerOverrides;
     this.abortController = new AbortController();
     this.providerRegistry = buildProviderRegistry(this.sessionLogger, {
       runtimeSettings: this.agentProviderRuntimeSettings,
+      providerOverrides: this.providerOverrides,
     });
 
     // Initialize per-session managers
@@ -1130,10 +1172,20 @@ export class Session {
     const updatedAt = new Date(this.resolveStoredAgentPayloadUpdatedAt(record));
     const lastUserMessageAt = record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null;
 
-    const provider = coerceAgentProvider(this.sessionLogger, record.provider, record.id);
+    const provider = coerceAgentProvider(
+      this.sessionLogger,
+      this.providerRegistry,
+      record.provider,
+      record.id,
+    );
     const runtimeInfo = record.runtimeInfo
       ? {
-          provider: coerceAgentProvider(this.sessionLogger, record.runtimeInfo.provider, record.id),
+          provider: coerceAgentProvider(
+            this.sessionLogger,
+            this.providerRegistry,
+            record.runtimeInfo.provider,
+            record.id,
+          ),
           sessionId: record.runtimeInfo.sessionId,
           ...(Object.prototype.hasOwnProperty.call(record.runtimeInfo, "model")
             ? { model: record.runtimeInfo.model ?? null }
@@ -1166,7 +1218,11 @@ export class Session {
       currentModeId: record.lastModeId ?? null,
       availableModes: [],
       pendingPermissions: [],
-      persistence: toAgentPersistenceHandle(this.sessionLogger, record.persistence),
+      persistence: toAgentPersistenceHandle(
+        this.sessionLogger,
+        this.providerRegistry,
+        record.persistence,
+      ),
       lastUsage: undefined,
       lastError: record.lastError ?? undefined,
       title: record.title ?? record.config?.title ?? null,
@@ -1892,241 +1948,241 @@ export class Session {
             await this.handleChatWaitRequest(msg);
             break;
 
-        case "github_search_request":
-          await this.handleGitHubSearchRequest(msg);
-          break;
+          case "github_search_request":
+            await this.handleGitHubSearchRequest(msg);
+            break;
 
-        case "directory_suggestions_request":
-          await this.handleDirectorySuggestionsRequest(msg);
-          break;
+          case "directory_suggestions_request":
+            await this.handleDirectorySuggestionsRequest(msg);
+            break;
 
-        case "checkout_pr_create_request":
-          await this.handleCheckoutPrCreateRequest(msg);
-          break;
+          case "checkout_pr_create_request":
+            await this.handleCheckoutPrCreateRequest(msg);
+            break;
 
-        case "checkout_pr_status_request":
-          await this.handleCheckoutPrStatusRequest(msg);
-          break;
+          case "checkout_pr_status_request":
+            await this.handleCheckoutPrStatusRequest(msg);
+            break;
 
-        case "paseo_worktree_list_request":
-          await this.handlePaseoWorktreeListRequest(msg);
-          break;
+          case "paseo_worktree_list_request":
+            await this.handlePaseoWorktreeListRequest(msg);
+            break;
 
-        case "paseo_worktree_archive_request":
-          await this.handlePaseoWorktreeArchiveRequest(msg);
-          break;
+          case "paseo_worktree_archive_request":
+            await this.handlePaseoWorktreeArchiveRequest(msg);
+            break;
 
-        case "create_paseo_worktree_request":
-          await this.handleCreatePaseoWorktreeRequest(msg);
-          break;
+          case "create_paseo_worktree_request":
+            await this.handleCreatePaseoWorktreeRequest(msg);
+            break;
 
-        case "workspace_setup_status_request":
-          await this.handleWorkspaceSetupStatusRequest(msg);
-          break;
+          case "workspace_setup_status_request":
+            await this.handleWorkspaceSetupStatusRequest(msg);
+            break;
 
-        case "list_available_editors_request":
-          await this.handleListAvailableEditorsRequest(msg);
-          break;
+          case "list_available_editors_request":
+            await this.handleListAvailableEditorsRequest(msg);
+            break;
 
-        case "open_in_editor_request":
-          await this.handleOpenInEditorRequest(msg);
-          break;
+          case "open_in_editor_request":
+            await this.handleOpenInEditorRequest(msg);
+            break;
 
-        case "open_project_request":
-          await this.handleOpenProjectRequest(msg);
-          break;
+          case "open_project_request":
+            await this.handleOpenProjectRequest(msg);
+            break;
 
-        case "archive_workspace_request":
-          await this.handleArchiveWorkspaceRequest(msg);
-          break;
+          case "archive_workspace_request":
+            await this.handleArchiveWorkspaceRequest(msg);
+            break;
 
-        case "file_explorer_request":
-          await this.handleFileExplorerRequest(msg);
-          break;
+          case "file_explorer_request":
+            await this.handleFileExplorerRequest(msg);
+            break;
 
-        case "project_icon_request":
-          await this.handleProjectIconRequest(msg);
-          break;
+          case "project_icon_request":
+            await this.handleProjectIconRequest(msg);
+            break;
 
-        case "file_download_token_request":
-          await this.handleFileDownloadTokenRequest(msg);
-          break;
+          case "file_download_token_request":
+            await this.handleFileDownloadTokenRequest(msg);
+            break;
 
-        case "list_provider_models_request":
-          await this.handleListProviderModelsRequest(msg);
-          break;
+          case "list_provider_models_request":
+            await this.handleListProviderModelsRequest(msg);
+            break;
 
-        case "list_provider_modes_request":
-          await this.handleListProviderModesRequest(msg);
-          break;
+          case "list_provider_modes_request":
+            await this.handleListProviderModesRequest(msg);
+            break;
 
-        case "list_provider_features_request":
-          await this.handleListProviderFeaturesRequest(msg);
-          break;
+          case "list_provider_features_request":
+            await this.handleListProviderFeaturesRequest(msg);
+            break;
 
-        case "list_available_providers_request":
-          await this.handleListAvailableProvidersRequest(msg);
-          break;
+          case "list_available_providers_request":
+            await this.handleListAvailableProvidersRequest(msg);
+            break;
 
-        case "get_providers_snapshot_request":
-          await this.handleGetProvidersSnapshotRequest(msg);
-          break;
+          case "get_providers_snapshot_request":
+            await this.handleGetProvidersSnapshotRequest(msg);
+            break;
 
-        case "refresh_providers_snapshot_request":
-          await this.handleRefreshProvidersSnapshotRequest(msg);
-          break;
+          case "refresh_providers_snapshot_request":
+            await this.handleRefreshProvidersSnapshotRequest(msg);
+            break;
 
-        case "provider_diagnostic_request":
-          await this.handleProviderDiagnosticRequest(msg);
-          break;
+          case "provider_diagnostic_request":
+            await this.handleProviderDiagnosticRequest(msg);
+            break;
 
-        case "clear_agent_attention":
-          await this.handleClearAgentAttention(msg.agentId);
-          break;
+          case "clear_agent_attention":
+            await this.handleClearAgentAttention(msg.agentId);
+            break;
 
-        case "client_heartbeat":
-          this.handleClientHeartbeat(msg);
-          break;
+          case "client_heartbeat":
+            this.handleClientHeartbeat(msg);
+            break;
 
-        case "ping": {
-          const now = Date.now();
-          this.emit({
-            type: "pong",
-            payload: {
-              requestId: msg.requestId,
-              clientSentAt: msg.clientSentAt,
-              serverReceivedAt: now,
-              serverSentAt: now,
-            },
-          });
-          break;
+          case "ping": {
+            const now = Date.now();
+            this.emit({
+              type: "pong",
+              payload: {
+                requestId: msg.requestId,
+                clientSentAt: msg.clientSentAt,
+                serverReceivedAt: now,
+                serverSentAt: now,
+              },
+            });
+            break;
+          }
+
+          case "list_commands_request":
+            await this.handleListCommandsRequest(msg);
+            break;
+
+          case "register_push_token":
+            this.handleRegisterPushToken(msg.token);
+            break;
+
+          case "subscribe_terminals_request":
+            this.handleSubscribeTerminalsRequest(msg);
+            break;
+
+          case "unsubscribe_terminals_request":
+            this.handleUnsubscribeTerminalsRequest(msg);
+            break;
+
+          case "list_terminals_request":
+            await this.handleListTerminalsRequest(msg);
+            break;
+
+          case "create_terminal_request":
+            await this.handleCreateTerminalRequest(msg);
+            break;
+
+          case "start_workspace_script_request":
+            await this.handleStartWorkspaceScriptRequest(msg);
+            break;
+
+          case "subscribe_terminal_request":
+            await this.handleSubscribeTerminalRequest(msg);
+            break;
+
+          case "unsubscribe_terminal_request":
+            this.handleUnsubscribeTerminalRequest(msg);
+            break;
+
+          case "terminal_input":
+            this.handleTerminalInput(msg);
+            break;
+
+          case "kill_terminal_request":
+            await this.handleKillTerminalRequest(msg);
+            break;
+
+          case "capture_terminal_request":
+            await this.handleCaptureTerminalRequest(msg);
+            break;
+
+          case "chat/create":
+            await this.handleChatCreateRequest(msg);
+            break;
+
+          case "chat/list":
+            await this.handleChatListRequest(msg);
+            break;
+
+          case "chat/inspect":
+            await this.handleChatInspectRequest(msg);
+            break;
+
+          case "chat/delete":
+            await this.handleChatDeleteRequest(msg);
+            break;
+
+          case "chat/post":
+            await this.handleChatPostRequest(msg);
+            break;
+
+          case "chat/read":
+            await this.handleChatReadRequest(msg);
+            break;
+
+          case "chat/wait":
+            await this.handleChatWaitRequest(msg);
+            break;
+
+          case "schedule/create":
+            await this.handleScheduleCreateRequest(msg);
+            break;
+
+          case "schedule/list":
+            await this.handleScheduleListRequest(msg);
+            break;
+
+          case "schedule/inspect":
+            await this.handleScheduleInspectRequest(msg);
+            break;
+
+          case "schedule/logs":
+            await this.handleScheduleLogsRequest(msg);
+            break;
+
+          case "schedule/pause":
+            await this.handleSchedulePauseRequest(msg);
+            break;
+
+          case "schedule/resume":
+            await this.handleScheduleResumeRequest(msg);
+            break;
+
+          case "schedule/delete":
+            await this.handleScheduleDeleteRequest(msg);
+            break;
+
+          case "loop/run":
+            await this.handleLoopRunRequest(msg);
+            break;
+
+          case "loop/list":
+            await this.handleLoopListRequest(msg);
+            break;
+
+          case "loop/inspect":
+            await this.handleLoopInspectRequest(msg);
+            break;
+
+          case "loop/logs":
+            await this.handleLoopLogsRequest(msg);
+            break;
+
+          case "loop/stop":
+            await this.handleLoopStopRequest(msg);
+            break;
         }
-
-        case "list_commands_request":
-          await this.handleListCommandsRequest(msg);
-          break;
-
-        case "register_push_token":
-          this.handleRegisterPushToken(msg.token);
-          break;
-
-        case "subscribe_terminals_request":
-          this.handleSubscribeTerminalsRequest(msg);
-          break;
-
-        case "unsubscribe_terminals_request":
-          this.handleUnsubscribeTerminalsRequest(msg);
-          break;
-
-        case "list_terminals_request":
-          await this.handleListTerminalsRequest(msg);
-          break;
-
-        case "create_terminal_request":
-          await this.handleCreateTerminalRequest(msg);
-          break;
-
-        case "start_workspace_script_request":
-          await this.handleStartWorkspaceScriptRequest(msg);
-          break;
-
-        case "subscribe_terminal_request":
-          await this.handleSubscribeTerminalRequest(msg);
-          break;
-
-        case "unsubscribe_terminal_request":
-          this.handleUnsubscribeTerminalRequest(msg);
-          break;
-
-        case "terminal_input":
-          this.handleTerminalInput(msg);
-          break;
-
-        case "kill_terminal_request":
-          await this.handleKillTerminalRequest(msg);
-          break;
-
-        case "capture_terminal_request":
-          await this.handleCaptureTerminalRequest(msg);
-          break;
-
-        case "chat/create":
-          await this.handleChatCreateRequest(msg);
-          break;
-
-        case "chat/list":
-          await this.handleChatListRequest(msg);
-          break;
-
-        case "chat/inspect":
-          await this.handleChatInspectRequest(msg);
-          break;
-
-        case "chat/delete":
-          await this.handleChatDeleteRequest(msg);
-          break;
-
-        case "chat/post":
-          await this.handleChatPostRequest(msg);
-          break;
-
-        case "chat/read":
-          await this.handleChatReadRequest(msg);
-          break;
-
-        case "chat/wait":
-          await this.handleChatWaitRequest(msg);
-          break;
-
-        case "schedule/create":
-          await this.handleScheduleCreateRequest(msg);
-          break;
-
-        case "schedule/list":
-          await this.handleScheduleListRequest(msg);
-          break;
-
-        case "schedule/inspect":
-          await this.handleScheduleInspectRequest(msg);
-          break;
-
-        case "schedule/logs":
-          await this.handleScheduleLogsRequest(msg);
-          break;
-
-        case "schedule/pause":
-          await this.handleSchedulePauseRequest(msg);
-          break;
-
-        case "schedule/resume":
-          await this.handleScheduleResumeRequest(msg);
-          break;
-
-        case "schedule/delete":
-          await this.handleScheduleDeleteRequest(msg);
-          break;
-
-        case "loop/run":
-          await this.handleLoopRunRequest(msg);
-          break;
-
-        case "loop/list":
-          await this.handleLoopListRequest(msg);
-          break;
-
-        case "loop/inspect":
-          await this.handleLoopInspectRequest(msg);
-          break;
-
-        case "loop/logs":
-          await this.handleLoopLogsRequest(msg);
-          break;
-
-        case "loop/stop":
-          await this.handleLoopStopRequest(msg);
-          break;
-      }
-    } catch (error: any) {
+      } catch (error: any) {
         const err = error instanceof Error ? error : new Error(String(error));
         this.sessionLogger.error({ err }, "Error handling message");
 
@@ -2285,10 +2341,7 @@ export class Session {
       await this.agentStorage.remove(agentId);
       await this.agentManager.deleteCommittedTimeline(agentId);
     } catch (error: any) {
-      this.sessionLogger.error(
-        { err: error, agentId },
-        `Failed to fully delete agent ${agentId}`,
-      );
+      this.sessionLogger.error({ err: error, agentId }, `Failed to fully delete agent ${agentId}`);
     }
 
     this.emit({
@@ -3008,11 +3061,10 @@ export class Session {
         worktreeName,
         attachments,
       );
-      const resolvedWorkspace =
-        msg.workspaceId
-          ? await this.resolveWorkspaceByIdOrDirectory(msg.workspaceId)
-          : (await this.findWorkspaceByDirectory(sessionConfig.cwd)) ??
-            (await this.findOrCreateWorkspaceForDirectory(sessionConfig.cwd));
+      const resolvedWorkspace = msg.workspaceId
+        ? await this.resolveWorkspaceByIdOrDirectory(msg.workspaceId)
+        : ((await this.findWorkspaceByDirectory(sessionConfig.cwd)) ??
+          (await this.findOrCreateWorkspaceForDirectory(sessionConfig.cwd)));
       if (!resolvedWorkspace) {
         throw new Error(`Workspace not found: ${msg.workspaceId}`);
       }
@@ -3682,7 +3734,7 @@ export class Session {
   private async checkoutExistingBranch(cwd: string, branch: string): Promise<void> {
     this.assertSafeGitRef(branch, "branch");
     try {
-      await execFileAsync("git", ["rev-parse", "--verify", branch], { cwd });
+      await execCommand("git", ["rev-parse", "--verify", branch], { cwd });
     } catch (error) {
       throw new Error(`Branch not found: ${branch}`);
     }
@@ -3696,7 +3748,7 @@ export class Session {
     }
 
     await this.ensureCleanWorkingTree(cwd);
-    await execFileAsync("git", ["checkout", branch], { cwd });
+    await execCommand("git", ["checkout", branch], { cwd });
   }
 
   private async createBranchFromBase(params: {
@@ -3709,7 +3761,7 @@ export class Session {
     this.assertSafeGitRef(newBranchName, "new branch");
 
     try {
-      await execFileAsync("git", ["rev-parse", "--verify", baseBranch], { cwd });
+      await execCommand("git", ["rev-parse", "--verify", baseBranch], { cwd });
     } catch (error) {
       throw new Error(`Base branch not found: ${baseBranch}`);
     }
@@ -3720,7 +3772,7 @@ export class Session {
     }
 
     await this.ensureCleanWorkingTree(cwd);
-    await execFileAsync("git", ["checkout", "-b", newBranchName, baseBranch], {
+    await execCommand("git", ["checkout", "-b", newBranchName, baseBranch], {
       cwd,
     });
   }
@@ -3728,7 +3780,7 @@ export class Session {
   private async doesLocalBranchExist(cwd: string, branch: string): Promise<boolean> {
     this.assertSafeGitRef(branch, "branch");
     try {
-      await execFileAsync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
+      await execCommand("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
         cwd,
       });
       return true;
@@ -4190,7 +4242,7 @@ export class Session {
 
       // Try local branch first
       try {
-        await execFileAsync("git", ["rev-parse", "--verify", branchName], {
+        await execCommand("git", ["rev-parse", "--verify", branchName], {
           cwd: resolvedCwd,
           env: READ_ONLY_GIT_ENV,
         });
@@ -4211,7 +4263,7 @@ export class Session {
 
       // Try remote branch (origin/{branchName})
       try {
-        await execFileAsync("git", ["rev-parse", "--verify", `origin/${branchName}`], {
+        await execCommand("git", ["rev-parse", "--verify", `origin/${branchName}`], {
           cwd: resolvedCwd,
           env: READ_ONLY_GIT_ENV,
         });
@@ -4358,6 +4410,30 @@ export class Session {
     }
   }
 
+  private closeWorkspaceGitWatchTarget(target: WorkspaceGitWatchTarget): void {
+    if (target.debounceTimer) {
+      clearTimeout(target.debounceTimer);
+      target.debounceTimer = null;
+    }
+    for (const watcher of target.watchers) {
+      try {
+        watcher.close();
+      } catch {
+        // Ignore watcher close errors
+      }
+    }
+    target.watchers.length = 0;
+  }
+
+  private async removeWorkspaceGitWatchTarget(cwd: string): Promise<void> {
+    const workspaceId = normalizePersistedWorkspaceId(cwd);
+    const target = this.workspaceGitWatchTargets.get(workspaceId);
+    if (target) {
+      this.closeWorkspaceGitWatchTarget(target);
+      this.workspaceGitWatchTargets.delete(workspaceId);
+    }
+  }
+
   private removeWorkspaceGitSubscription(cwd: string): void {
     const workspaceId = normalizePersistedWorkspaceId(cwd);
     const target = this.workspaceGitWatchTargets.get(workspaceId);
@@ -4423,100 +4499,6 @@ export class Session {
       });
       this.rememberWorkspaceGitWatchFingerprint(persistedWorkspace.directory, workspace);
     }
-  }
-
-  private scheduleWorkspaceGitWatchRefresh(target: WorkspaceGitWatchTarget): void {
-    if (target.debounceTimer) {
-      clearTimeout(target.debounceTimer);
-    }
-    target.debounceTimer = setTimeout(() => {
-      target.debounceTimer = null;
-      void this.refreshWorkspaceGitWatchTarget(target);
-    }, WORKSPACE_GIT_WATCH_DEBOUNCE_MS);
-  }
-
-  private async refreshWorkspaceGitWatchTarget(target: WorkspaceGitWatchTarget): Promise<void> {
-    if (target.refreshPromise) {
-      target.refreshQueued = true;
-      return;
-    }
-
-    target.refreshPromise = (async () => {
-      do {
-        target.refreshQueued = false;
-        await this.emitWorkspaceUpdateForCwd(target.cwd, {
-          dedupeGitState: true,
-        });
-      } while (target.refreshQueued);
-    })();
-
-    try {
-      await target.refreshPromise;
-    } finally {
-      target.refreshPromise = null;
-    }
-  }
-
-  private async ensureWorkspaceGitWatchTarget(cwd: string): Promise<void> {
-    const workspaceId = normalizePersistedWorkspaceId(cwd);
-    if (this.workspaceGitWatchTargets.has(workspaceId)) {
-      return;
-    }
-
-    const gitDir = await resolveCheckoutGitDir(cwd);
-    if (!gitDir) {
-      return;
-    }
-
-    const refsRoot = await this.resolveWorkspaceGitRefsRoot(gitDir);
-    const target: WorkspaceGitWatchTarget = {
-      cwd: workspaceId,
-      watchers: [],
-      debounceTimer: null,
-      refreshPromise: null,
-      refreshQueued: false,
-      latestFingerprint: null,
-      lastBranchName: null,
-    };
-
-    for (const watchPath of new Set([join(gitDir, "HEAD"), join(refsRoot, "refs", "heads")])) {
-      let watcher: FSWatcher | null = null;
-      try {
-        watcher = watch(watchPath, { recursive: false }, () => {
-          this.scheduleWorkspaceGitWatchRefresh(target);
-        });
-      } catch (error) {
-        this.sessionLogger.warn(
-          { err: error, cwd, watchPath },
-          "Failed to start workspace git watcher",
-        );
-      }
-
-      if (!watcher) {
-        continue;
-      }
-
-      watcher.on("error", (error) => {
-        this.sessionLogger.warn({ err: error, cwd, watchPath }, "Workspace git watcher error");
-      });
-      target.watchers.push(watcher);
-    }
-
-    if (target.watchers.length === 0) {
-      return;
-    }
-
-    this.workspaceGitWatchTargets.set(workspaceId, target);
-    const subscription = await this.backgroundGitFetchManager.subscribe(
-      { repoGitRoot: refsRoot, cwd: workspaceId },
-      () => {
-        const activeTarget = this.workspaceGitWatchTargets.get(workspaceId);
-        if (activeTarget) {
-          this.scheduleWorkspaceGitWatchRefresh(activeTarget);
-        }
-      },
-    );
-    this.workspaceGitFetchSubscriptions.set(workspaceId, subscription.unsubscribe);
   }
 
   private async syncWorkspaceGitWatchTarget(
@@ -4626,7 +4608,7 @@ export class Session {
       const message = branchLabel
         ? `${Session.PASEO_STASH_PREFIX} ${branchLabel}`
         : `${Session.PASEO_STASH_PREFIX} unnamed`;
-      await execFileAsync("git", ["stash", "push", "--include-untracked", "-m", message], { cwd });
+      await execCommand("git", ["stash", "push", "--include-untracked", "-m", message], { cwd });
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
       this.emit({
         type: "stash_save_response",
@@ -4645,7 +4627,7 @@ export class Session {
   ): Promise<void> {
     const { cwd, stashIndex, requestId } = msg;
     try {
-      await execFileAsync("git", ["stash", "pop", `stash@{${stashIndex}}`], { cwd });
+      await execCommand("git", ["stash", "pop", `stash@{${stashIndex}}`], { cwd });
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
       this.emit({
         type: "stash_pop_response",
@@ -5689,15 +5671,16 @@ export class Session {
       status: "done",
       activityAt: null,
       diffStat,
-      scripts: this.scriptRouteStore && this.scriptRuntimeStore
-        ? buildWorkspaceScriptPayloads({
-            workspaceDirectory: workspace.directory,
-            routeStore: this.scriptRouteStore,
-            runtimeStore: this.scriptRuntimeStore,
-            daemonPort: this.getDaemonTcpPort?.() ?? null,
-            resolveHealth: this.resolveScriptHealth ?? undefined,
-          })
-        : [],
+      scripts:
+        this.scriptRouteStore && this.scriptRuntimeStore
+          ? buildWorkspaceScriptPayloads({
+              workspaceDirectory: workspace.directory,
+              routeStore: this.scriptRouteStore,
+              runtimeStore: this.scriptRuntimeStore,
+              daemonPort: this.getDaemonTcpPort?.() ?? null,
+              resolveHealth: this.resolveScriptHealth ?? undefined,
+            })
+          : [],
     };
   }
 
@@ -5734,7 +5717,16 @@ export class Session {
     workspace: PersistedWorkspaceRecord,
     projectRecord?: PersistedProjectRecord | null,
   ): Promise<WorkspaceDescriptorPayload> {
-    return this.describeWorkspaceRecord(workspace, projectRecord);
+    const base = await this.describeWorkspaceRecord(workspace, projectRecord);
+    const snapshot = this.workspaceGitService.peekSnapshot(workspace.directory);
+    if (!snapshot) {
+      return base;
+    }
+    return {
+      ...base,
+      gitRuntime: this.buildWorkspaceGitRuntimePayload(snapshot) ?? undefined,
+      githubRuntime: this.buildWorkspaceGitHubRuntimePayload(snapshot),
+    };
   }
 
   private async buildWorkspaceDescriptor(input: {
@@ -6291,7 +6283,7 @@ export class Session {
 
   private async emitWorkspaceUpdatesForWorkspaceIds(
     workspaceIds: Iterable<string>,
-    options?: { skipReconcile?: boolean },
+    options?: { skipReconcile?: boolean; dedupeGitState?: boolean },
   ): Promise<void> {
     const subscription = this.workspaceUpdatesSubscription;
     if (!subscription) {
@@ -6364,7 +6356,7 @@ export class Session {
 
   private async emitWorkspaceUpdateForCwd(
     cwd: string,
-    options?: { skipReconcile?: boolean },
+    options?: { skipReconcile?: boolean; dedupeGitState?: boolean },
   ): Promise<void> {
     const activeWorkspaces = (await this.workspaceRegistry.list()).filter(
       (workspace) => !workspace.archivedAt,
@@ -6708,20 +6700,22 @@ export class Session {
         registerPendingWorktreeWorkspace: (options) =>
           this.registerPendingWorktreeWorkspace(options),
         sessionLogger: this.sessionLogger,
-        createPaseoWorktreeInBackground: (options) => this.createPaseoWorktreeInBackground(options),
+        runWorktreeSetupInBackground: (options) => this.runWorktreeSetupInBackground(options),
       },
       request,
     );
   }
 
-  private async createPaseoWorktreeInBackground(options: {
+  private async runWorktreeSetupInBackground(options: {
     requestCwd: string;
     repoRoot: string;
     workspaceId: number;
     worktree: { branchName: string; worktreePath: string };
     shouldBootstrap: boolean;
+    slug: string;
+    worktreePath: string;
   }): Promise<void> {
-    return createWorktreeInBackgroundSession(
+    return runWorktreeSetupInBackgroundSession(
       {
         paseoHome: this.paseoHome,
         emitWorkspaceUpdateForCwd: (cwd, emitOptions) =>
@@ -8455,7 +8449,9 @@ export class Session {
     }
 
     try {
-      const terminals = this.filterStandaloneTerminals(await this.terminalManager.getTerminals(cwd));
+      const terminals = this.filterStandaloneTerminals(
+        await this.terminalManager.getTerminals(cwd),
+      );
       for (const terminal of terminals) {
         this.ensureTerminalExitSubscription(terminal);
       }

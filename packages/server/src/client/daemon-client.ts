@@ -136,7 +136,7 @@ export type DaemonEvent =
       agentId: string;
       payload: Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
     }
-    | {
+  | {
       type: "workspace_update";
       workspaceId: string;
       payload: Extract<SessionOutboundMessage, { type: "workspace_update" }>["payload"];
@@ -1335,7 +1335,9 @@ export class DaemonClient {
     workspaceId: string,
     scriptName: string,
     requestId?: string,
-  ): Promise<Extract<SessionOutboundMessage, { type: "start_workspace_script_response" }>["payload"]> {
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "start_workspace_script_response" }>["payload"]
+  > {
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {

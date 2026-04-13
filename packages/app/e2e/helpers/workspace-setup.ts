@@ -10,9 +10,7 @@ import type { SessionOutboundMessage } from "@server/shared/messages";
 type WorkspaceSetupDaemonClient = {
   connect(): Promise<void>;
   close(): Promise<void>;
-  openProject(
-    cwd: string,
-  ): Promise<{
+  openProject(cwd: string): Promise<{
     workspace: {
       id: number;
       name: string;
@@ -21,9 +19,7 @@ type WorkspaceSetupDaemonClient = {
     } | null;
     error: string | null;
   }>;
-  createPaseoWorktree(
-    input: { cwd: string; worktreeSlug?: string },
-  ): Promise<{
+  createPaseoWorktree(input: { cwd: string; worktreeSlug?: string }): Promise<{
     workspace: {
       id: number;
       name: string;
@@ -45,15 +41,11 @@ type WorkspaceSetupDaemonClient = {
       agent: { id: string; cwd: string; workspaceId?: string | null };
     }>;
   }>;
-  fetchAgent(
-    agentId: string,
-  ): Promise<{
+  fetchAgent(agentId: string): Promise<{
     agent: { id: string; cwd: string } | null;
     project: unknown | null;
   } | null>;
-  listTerminals(
-    cwd: string,
-  ): Promise<{
+  listTerminals(cwd: string): Promise<{
     cwd?: string;
     terminals: Array<{ id: string; cwd: string; name: string }>;
     error?: string | null;
@@ -77,7 +69,11 @@ function getDaemonWsUrl(): string {
 }
 
 async function loadDaemonClientConstructor(): Promise<
-  new (config: { url: string; clientId: string; clientType: "cli" }) => WorkspaceSetupDaemonClient
+  new (config: {
+    url: string;
+    clientId: string;
+    clientType: "cli";
+  }) => WorkspaceSetupDaemonClient
 > {
   const repoRoot = path.resolve(process.cwd(), "../..");
   const moduleUrl = pathToFileURL(
@@ -149,7 +145,9 @@ export async function createWorkspaceFromSidebar(page: Page, repoPath: string): 
   await expect(button).toBeEnabled({ timeout: 30_000 });
   await button.click();
   await expect(page).toHaveURL(/\/new\?/, { timeout: 30_000 });
-  await expect(page.getByRole("textbox", { name: "Message agent..." }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("textbox", { name: "Message agent..." }).first()).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 export async function getCurrentWorkspaceIdFromRoute(page: Page): Promise<string> {
@@ -193,7 +191,10 @@ export async function createStandaloneTerminalFromWorkspaceSetup(page: Page): Pr
     .click();
 }
 
-export async function waitForWorkspaceSetupDialogToClose(page: Page, timeoutMs = 45_000): Promise<void> {
+export async function waitForWorkspaceSetupDialogToClose(
+  page: Page,
+  timeoutMs = 45_000,
+): Promise<void> {
   const dialog = workspaceSetupDialog(page);
 
   try {
@@ -243,7 +244,9 @@ export async function expectSetupLogContains(page: Page, text: string): Promise<
 }
 
 export async function expectNoSetupMessage(page: Page): Promise<void> {
-  await expect(page.getByText("No setup commands ran for this workspace.", { exact: true })).toBeVisible({
+  await expect(
+    page.getByText("No setup commands ran for this workspace.", { exact: true }),
+  ).toBeVisible({
     timeout: 30_000,
   });
 }
@@ -276,7 +279,8 @@ export async function findWorktreeWorkspaceForProject(
   const workspace =
     payload.entries.find(
       (entry) =>
-        entry.projectRootPath === normalizedRepoPath && entry.workspaceDirectory !== normalizedRepoPath,
+        entry.projectRootPath === normalizedRepoPath &&
+        entry.workspaceDirectory !== normalizedRepoPath,
     ) ?? null;
   if (!workspace) {
     throw new Error(`Failed to find created worktree workspace for ${repoPath}`);

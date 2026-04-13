@@ -596,11 +596,23 @@ function writeLegacyProjectWorkspaceJson(
 ): void {
   const projectsDir = path.join(paseoHome, "projects");
   mkdirSync(projectsDir, { recursive: true });
-  writeFileSync(path.join(projectsDir, "projects.json"), JSON.stringify(input.projects, null, 2), "utf8");
-  writeFileSync(path.join(projectsDir, "workspaces.json"), JSON.stringify(input.workspaces, null, 2), "utf8");
+  writeFileSync(
+    path.join(projectsDir, "projects.json"),
+    JSON.stringify(input.projects, null, 2),
+    "utf8",
+  );
+  writeFileSync(
+    path.join(projectsDir, "workspaces.json"),
+    JSON.stringify(input.workspaces, null, 2),
+    "utf8",
+  );
 }
 
-function writeLegacyAgentJson(paseoHome: string, relativePath: string, payload: Record<string, unknown>): void {
+function writeLegacyAgentJson(
+  paseoHome: string,
+  relativePath: string,
+  payload: Record<string, unknown>,
+): void {
   const absolutePath = path.join(paseoHome, relativePath);
   mkdirSync(path.dirname(absolutePath), { recursive: true });
   writeFileSync(absolutePath, JSON.stringify(payload, null, 2), "utf8");
@@ -608,7 +620,10 @@ function writeLegacyAgentJson(paseoHome: string, relativePath: string, payload: 
 
 function initializeGitRepo(directory: string): void {
   execFileSync("git", ["init", "-b", "main"], { cwd: directory, stdio: "pipe" });
-  execFileSync("git", ["config", "user.email", "test@getpaseo.dev"], { cwd: directory, stdio: "pipe" });
+  execFileSync("git", ["config", "user.email", "test@getpaseo.dev"], {
+    cwd: directory,
+    stdio: "pipe",
+  });
   execFileSync("git", ["config", "user.name", "Paseo Test"], { cwd: directory, stdio: "pipe" });
   writeFileSync(path.join(directory, "README.md"), "bootstrap fixture\n", "utf8");
   execFileSync("git", ["add", "README.md"], { cwd: directory, stdio: "pipe" });

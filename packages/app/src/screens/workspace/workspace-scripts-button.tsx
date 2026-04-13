@@ -1,7 +1,14 @@
 import { type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useMutation } from "@tanstack/react-query";
-import { ChevronDown, ExternalLink, Globe, LoaderCircle, Play, SquareTerminal } from "lucide-react-native";
+import {
+  ChevronDown,
+  ExternalLink,
+  Globe,
+  LoaderCircle,
+  Play,
+  SquareTerminal,
+} from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -58,10 +65,9 @@ export function WorkspaceScriptsButton({
       return result;
     },
     onError: (error, scriptName) => {
-      toast.show(
-        error instanceof Error ? error.message : `Failed to start ${scriptName}`,
-        { variant: "error" },
-      );
+      toast.show(error instanceof Error ? error.message : `Failed to start ${scriptName}`, {
+        variant: "error",
+      });
     },
   });
 
@@ -88,9 +94,7 @@ export function WorkspaceScriptsButton({
               <Play
                 size={14}
                 color={
-                  hasAnyRunning
-                    ? theme.colors.palette.blue[500]
-                    : theme.colors.foregroundMuted
+                  hasAnyRunning ? theme.colors.palette.blue[500] : theme.colors.foregroundMuted
                 }
                 fill="transparent"
               />

@@ -227,7 +227,10 @@ describe("DbAgentSnapshotStore", () => {
   test("upsert is idempotent for the same agent ID", async () => {
     const workspaceId = await seedWorkspace(database, { directory: "/tmp/project" });
 
-    await store.upsert(createStoredAgentRecord({ id: "agent-idempotent", title: "Initial" }), workspaceId);
+    await store.upsert(
+      createStoredAgentRecord({ id: "agent-idempotent", title: "Initial" }),
+      workspaceId,
+    );
     await store.upsert(
       createStoredAgentRecord({
         id: "agent-idempotent",
@@ -254,23 +257,29 @@ async function seedWorkspace(
   database: PaseoDatabaseHandle,
   options: { directory: string },
 ): Promise<number> {
-  const [project] = await database.db.insert(projects).values({
-    directory: options.directory,
-    kind: "git",
-    displayName: "project-1",
-    gitRemote: null,
-    createdAt: "2026-03-01T00:00:00.000Z",
-    updatedAt: "2026-03-01T00:00:00.000Z",
-    archivedAt: null,
-  }).returning();
-  const [workspace] = await database.db.insert(workspaces).values({
-    projectId: project.id,
-    directory: options.directory,
-    kind: "checkout",
-    displayName: "main",
-    createdAt: "2026-03-01T00:00:00.000Z",
-    updatedAt: "2026-03-01T00:00:00.000Z",
-    archivedAt: null,
-  }).returning();
+  const [project] = await database.db
+    .insert(projects)
+    .values({
+      directory: options.directory,
+      kind: "git",
+      displayName: "project-1",
+      gitRemote: null,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      archivedAt: null,
+    })
+    .returning();
+  const [workspace] = await database.db
+    .insert(workspaces)
+    .values({
+      projectId: project.id,
+      directory: options.directory,
+      kind: "checkout",
+      displayName: "main",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      archivedAt: null,
+    })
+    .returning();
   return workspace.id;
 }

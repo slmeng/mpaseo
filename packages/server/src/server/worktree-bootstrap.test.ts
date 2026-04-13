@@ -515,11 +515,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       async getTerminals() {
         return [];
       },
-      async createTerminal(options: {
-        cwd: string;
-        name?: string;
-        env?: Record<string, string>;
-      }) {
+      async createTerminal(options: { cwd: string; name?: string; env?: Record<string, string> }) {
         createTerminalCalls.push(options);
         return {
           id: "term-service",
@@ -576,7 +572,8 @@ describe("runAsyncWorktreeBootstrap", () => {
 
     const routeStore = new ScriptRouteStore();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
-    const createTerminalCalls: Array<{ cwd: string; name?: string; env?: Record<string, string> }> = [];
+    const createTerminalCalls: Array<{ cwd: string; name?: string; env?: Record<string, string> }> =
+      [];
 
     const results = await spawnWorktreeScripts({
       repoRoot: repoDir,
@@ -622,7 +619,8 @@ describe("runAsyncWorktreeBootstrap", () => {
 
     const routeStore = new ScriptRouteStore();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
-    const createTerminalCalls: Array<{ cwd: string; name?: string; env?: Record<string, string> }> = [];
+    const createTerminalCalls: Array<{ cwd: string; name?: string; env?: Record<string, string> }> =
+      [];
 
     const results = await spawnWorktreeScripts({
       repoRoot: repoDir,

@@ -50,7 +50,10 @@ import type { DraggableListDragHandleProps } from "./draggable-list.types";
 import { getHostRuntimeStore, isHostRuntimeConnected } from "@/runtime/host-runtime";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { projectIconQueryKey } from "@/hooks/use-project-icon-query";
-import { buildHostNewWorkspaceRoute, parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
+import {
+  buildHostNewWorkspaceRoute,
+  parseHostWorkspaceRouteFromPathname,
+} from "@/utils/host-routes";
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import {
   type SidebarProjectEntry,
@@ -99,6 +102,7 @@ import {
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { createNameId } from "mnemonic-id";
+import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -214,18 +218,12 @@ export function PrBadge({ hint }: { hint: PrHint }) {
       hitSlop={4}
       onPressIn={handlePressIn}
       onPress={handlePress}
-      onPointerEnter={() => setIsHovered(true)}
-      onPointerLeave={() => setIsHovered(false)}
-      style={({ pressed }) => [
-        prBadgeStyles.badge,
-        pressed && prBadgeStyles.badgePressed,
-      ]}
+      onHoverIn={() => setIsHovered(true)}
+      onHoverOut={() => setIsHovered(false)}
+      style={({ pressed }) => [prBadgeStyles.badge, pressed && prBadgeStyles.badgePressed]}
     >
       <GitPullRequest size={12} color={activeColor} />
-      <Text
-        style={[prBadgeStyles.text, { color: activeColor }]}
-        numberOfLines={1}
-      >
+      <Text style={[prBadgeStyles.text, { color: activeColor }]} numberOfLines={1}>
         #{hint.number}
       </Text>
       <ArrowUpRight size={10} color={activeColor} style={{ opacity: isHovered ? 1 : 0 }} />
@@ -280,7 +278,6 @@ const checksBadgeStyles = StyleSheet.create((theme) => ({
     lineHeight: 14,
   },
 }));
-
 
 function WorkspaceStatusIndicator({
   bucket,
@@ -613,7 +610,7 @@ function useLongPressDragInteraction(input: {
       input.drag();
     }, DRAG_ARM_DELAY_MS);
 
-    if (!input.menuController || Platform.OS === "web") {
+    if (!input.menuController || platformIsWeb) {
       return;
     }
 
@@ -778,7 +775,9 @@ function ProjectHeaderRow({
     if (!serverId) {
       return;
     }
-    router.navigate(buildHostNewWorkspaceRoute(serverId, project.iconWorkingDir, { displayName }) as any);
+    router.navigate(
+      buildHostNewWorkspaceRoute(serverId, project.iconWorkingDir, { displayName }) as any,
+    );
     onWorkspacePress?.();
   }, [displayName, onWorkspacePress, project.iconWorkingDir, serverId]);
   const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
@@ -836,15 +835,18 @@ function ProjectHeaderRow({
           <NewWorktreeButton
             displayName={displayName}
             onPress={handleBeginWorkspaceSetup}
-            visible={isHovered || isMobileBreakpoint}
+            visible={isHovered || platformIsNative || isMobileBreakpoint}
             showShortcutHint={isProjectActive}
             testID={`sidebar-project-new-worktree-${project.projectKey}`}
           />
         ) : null}
         {onRemoveProject ? (
           <View
-            style={!(isHovered || isMobileBreakpoint) && styles.projectKebabButtonHidden}
-            pointerEvents={isHovered || isMobileBreakpoint ? "auto" : "none"}
+            style={
+              !(isHovered || platformIsNative || isMobileBreakpoint) &&
+              styles.projectKebabButtonHidden
+            }
+            pointerEvents={isHovered || platformIsNative || isMobileBreakpoint ? "auto" : "none"}
           >
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -954,8 +956,9 @@ function WorkspaceRowInner({
   archiveShortcutKeys,
 }: WorkspaceRowInnerProps) {
   const { theme } = useUnistyles();
+  const isCompact = useIsCompactFormFactor();
   const [isHovered, setIsHovered] = useState(false);
-  const isTouchPlatform = Platform.OS !== "web";
+  const isTouchPlatform = platformIsNative;
   const workspaceDirectory = resolveWorkspaceExecutionDirectory({
     workspaceDirectory: workspace.workspaceDirectory,
   });
@@ -1080,7 +1083,9 @@ function WorkspaceRowInner({
                     <DropdownMenuItem
                       testID={`sidebar-workspace-menu-archive-${workspace.workspaceKey}`}
                       leading={<Archive size={14} color={theme.colors.foregroundMuted} />}
-                      trailing={archiveShortcutKeys ? <Shortcut chord={archiveShortcutKeys} /> : null}
+                      trailing={
+                        archiveShortcutKeys ? <Shortcut chord={archiveShortcutKeys} /> : null
+                      }
                       status={archiveStatus}
                       pendingLabel={archivePendingLabel}
                       onSelect={onArchive}
@@ -1870,7 +1875,6 @@ export function SidebarWorkspaceList({
   parentGestureRef,
 }: SidebarWorkspaceListProps) {
   const isMobile = useIsCompactFormFactor();
-  const isNative = Platform.OS !== "web";
   const pathname = usePathname();
   const activeWorkspaceSelection = useNavigationActiveWorkspaceSelection();
   const [creatingWorkspaceIds, setCreatingWorkspaceIds] = useState<Set<string>>(() => new Set());
@@ -2104,7 +2108,7 @@ export function SidebarWorkspaceList({
           drag={drag}
           isDragging={isActive}
           dragHandleProps={dragHandleProps}
-          useNestable={isNative}
+          useNestable={platformIsNative}
           creatingWorkspaceIds={creatingWorkspaceIds}
         />
       );
@@ -2121,7 +2125,7 @@ export function SidebarWorkspaceList({
       serverId,
       shortcutIndexByWorkspaceKey,
       showShortcutBadges,
-      isNative,
+      platformIsNative,
       creatingWorkspaceIds,
     ],
   );
@@ -2145,7 +2149,7 @@ export function SidebarWorkspaceList({
           onDragEnd={handleProjectDragEnd}
           scrollEnabled={false}
           useDragHandle
-          nestable={isNative}
+          nestable={platformIsNative}
           simultaneousGestureRef={parentGestureRef}
           containerStyle={styles.projectListContainer}
         />
@@ -2156,7 +2160,7 @@ export function SidebarWorkspaceList({
 
   return (
     <View style={styles.container}>
-      {isNative ? (
+      {platformIsNative ? (
         <NestableScrollContainer
           style={styles.list}
           contentContainerStyle={styles.listContent}

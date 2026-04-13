@@ -33,11 +33,7 @@ export class DbWorkspaceRegistry implements WorkspaceRegistry {
   }
 
   async get(id: number): Promise<PersistedWorkspaceRecord | null> {
-    const rows = await this.db
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.id, id))
-      .limit(1);
+    const rows = await this.db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
     const row = rows[0];
     return row ? toPersistedWorkspaceRecord(row) : null;
   }

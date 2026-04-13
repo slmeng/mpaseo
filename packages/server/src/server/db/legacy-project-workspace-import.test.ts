@@ -313,7 +313,10 @@ function writeLegacyJson(input: {
   const projectsPath = path.join(input.paseoHome, "projects", "projects.json");
   const workspacesPath = path.join(input.paseoHome, "projects", "workspaces.json");
   mkdirSync(path.dirname(projectsPath), { recursive: true });
-  writeFileSync(projectsPath, JSON.stringify(input.projectsJson, null, 2), { encoding: "utf8", flag: "w" });
+  writeFileSync(projectsPath, JSON.stringify(input.projectsJson, null, 2), {
+    encoding: "utf8",
+    flag: "w",
+  });
   writeFileSync(workspacesPath, JSON.stringify(input.workspacesJson, null, 2), {
     encoding: "utf8",
     flag: "w",

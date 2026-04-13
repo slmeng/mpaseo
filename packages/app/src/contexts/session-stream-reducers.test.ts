@@ -154,10 +154,7 @@ describe("processTimelineResponse", () => {
         direction: "before",
         startSeq: 1,
         endSeq: 2,
-        entries: [
-          makeTimelineEntry(1, "hello", "user_message"),
-          makeTimelineEntry(2, "older"),
-        ],
+        entries: [makeTimelineEntry(1, "hello", "user_message"), makeTimelineEntry(2, "older")],
       },
     });
 

@@ -3,7 +3,13 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { createNameId } from "mnemonic-id";
 import { useQuery } from "@tanstack/react-query";
-import { CircleDot, ChevronDown, ExternalLink, GitBranch, GitPullRequest } from "lucide-react-native";
+import {
+  CircleDot,
+  ChevronDown,
+  ExternalLink,
+  GitBranch,
+  GitPullRequest,
+} from "lucide-react-native";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { Composer } from "@/components/composer";
 import { Combobox, ComboboxItem } from "@/components/ui/combobox";
@@ -26,9 +32,7 @@ import { encodeImages } from "@/utils/encode-images";
 import { toErrorMessage } from "@/utils/error-messages";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { buildGitHubAttachmentFromSearchItem } from "@/utils/review-attachments";
-import {
-  requireWorkspaceExecutionAuthority,
-} from "@/utils/workspace-execution";
+import { requireWorkspaceExecutionAuthority } from "@/utils/workspace-execution";
 import { navigateToPreparedWorkspaceTab } from "@/utils/workspace-navigation";
 import type { ImageAttachment, MessagePayload } from "@/components/message-input";
 import type { GitHubSearchItem } from "@server/shared/messages";
@@ -123,14 +127,13 @@ export function NewWorkspaceScreen({
 
   const githubSearchOptions: ComboboxOptionType[] = useMemo(() => {
     const items = githubSearchResultsQuery.data?.items ?? [];
-    return items
-      .map((item) => ({
-        id: `${item.kind}:${item.number}`,
-        label: `#${item.number} ${item.title}`,
-        // Include search query so the Combobox's client-side filter doesn't
-        // discard server-searched results that match on body but not title.
-        description: githubSearchQuery_trimmed,
-      }));
+    return items.map((item) => ({
+      id: `${item.kind}:${item.number}`,
+      label: `#${item.number} ${item.title}`,
+      // Include search query so the Combobox's client-side filter doesn't
+      // discard server-searched results that match on body but not title.
+      description: githubSearchQuery_trimmed,
+    }));
   }, [githubSearchResultsQuery.data?.items, githubSearchQuery_trimmed]);
 
   const handleSelectGithubItem = useCallback(
@@ -198,7 +201,9 @@ export function NewWorkspaceScreen({
         const initialPrompt = text.trim();
         const encodedImages = await encodeImages(images);
         const reviewAttachment = buildGitHubAttachmentFromSearchItem(selectedGithubItem);
-        const workspaceDirectory = requireWorkspaceExecutionAuthority({ workspace }).workspaceDirectory;
+        const workspaceDirectory = requireWorkspaceExecutionAuthority({
+          workspace,
+        }).workspaceDirectory;
         const agent = await connectedClient.createAgent({
           provider: composerState.selectedProvider,
           cwd: workspaceDirectory,
@@ -234,7 +239,15 @@ export function NewWorkspaceScreen({
         setPendingAction(null);
       }
     },
-    [composerState, ensureWorkspace, selectedGithubItem, serverId, setAgents, toast, withConnectedClient],
+    [
+      composerState,
+      ensureWorkspace,
+      selectedGithubItem,
+      serverId,
+      setAgents,
+      toast,
+      withConnectedClient,
+    ],
   );
 
   const workspaceTitle =
@@ -337,10 +350,7 @@ export function NewWorkspaceScreen({
                     active={active}
                     onPress={onPress}
                     leadingSlot={
-                      <GitBranch
-                        size={theme.iconSize.sm}
-                        color={theme.colors.foregroundMuted}
-                      />
+                      <GitBranch size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
                     }
                   />
                 )}
@@ -366,7 +376,10 @@ export function NewWorkspaceScreen({
                   <>
                     <View style={styles.badgeIcon}>
                       {selectedGithubItem.kind === "pr" ? (
-                        <GitPullRequest size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+                        <GitPullRequest
+                          size={theme.iconSize.md}
+                          color={theme.colors.foregroundMuted}
+                        />
                       ) : (
                         <CircleDot size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
                       )}
@@ -400,7 +413,11 @@ export function NewWorkspaceScreen({
               </Pressable>
               <Combobox
                 options={githubSearchOptions}
-                value={selectedGithubItem ? `${selectedGithubItem.kind}:${selectedGithubItem.number}` : ""}
+                value={
+                  selectedGithubItem
+                    ? `${selectedGithubItem.kind}:${selectedGithubItem.number}`
+                    : ""
+                }
                 onSelect={handleSelectGithubItem}
                 searchable
                 searchPlaceholder="Search issues and PRs..."
@@ -414,9 +431,7 @@ export function NewWorkspaceScreen({
                 desktopPlacement="bottom-start"
                 anchorRef={githubAnchorRef}
                 emptyText={
-                  githubSearchResultsQuery.isFetching
-                    ? "Searching..."
-                    : "No results found."
+                  githubSearchResultsQuery.isFetching ? "Searching..." : "No results found."
                 }
                 renderOption={({ option, selected, active, onPress }) => {
                   const item = (githubSearchResultsQuery.data?.items ?? []).find(
@@ -452,7 +467,9 @@ export function NewWorkspaceScreen({
                             {({ hovered }) => (
                               <ExternalLink
                                 size={theme.iconSize.sm}
-                                color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+                                color={
+                                  hovered ? theme.colors.foreground : theme.colors.foregroundMuted
+                                }
                               />
                             )}
                           </Pressable>

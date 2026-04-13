@@ -70,7 +70,6 @@ if (!app.isPackaged) {
   }
 }
 
-
 // Allow users to pass Chromium flags via PASEO_ELECTRON_FLAGS for debugging
 // rendering issues (e.g. "--disable-gpu --ozone-platform=x11").
 // Must run before app.whenReady().

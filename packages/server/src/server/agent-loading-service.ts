@@ -16,10 +16,7 @@ const pendingAgentBootstrapLoads = new Map<string, Promise<ManagedAgent>>();
 export type AgentLoadingServiceOptions = {
   agentManager: Pick<
     AgentManager,
-    | "createAgent"
-    | "getAgent"
-    | "reloadAgentSession"
-    | "resumeAgentFromPersistence"
+    "createAgent" | "getAgent" | "reloadAgentSession" | "resumeAgentFromPersistence"
   >;
   agentStorage: Pick<AgentSnapshotStore, "get">;
   logger: pino.Logger;
@@ -114,7 +111,13 @@ export class AgentLoadingService {
         "Agent resumed from persistence",
       );
     } else {
-      snapshot = await this.agentManager.createAgent(buildSessionConfig(record), options.agentId, {
+      const sessionConfig = buildSessionConfig(record);
+      if (!sessionConfig) {
+        throw new Error(
+          `Agent ${options.agentId} has an invalid provider '${record.provider}' and cannot be loaded`,
+        );
+      }
+      snapshot = await this.agentManager.createAgent(sessionConfig, options.agentId, {
         labels: record.labels,
       });
       this.logger.info(

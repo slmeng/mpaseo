@@ -181,7 +181,11 @@ function restoreArchivedAgentListCacheSnapshot(
   serverId: string,
   snapshot: ArchivedAgentListCacheSnapshot,
 ): void {
-  restoreCachedListSnapshot(queryClient, ["sidebarAgentsList", serverId], snapshot.sidebarAgentsList);
+  restoreCachedListSnapshot(
+    queryClient,
+    ["sidebarAgentsList", serverId],
+    snapshot.sidebarAgentsList,
+  );
   restoreCachedListSnapshot(queryClient, ["allAgents", serverId], snapshot.allAgents);
 }
 

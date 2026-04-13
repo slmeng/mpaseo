@@ -36,7 +36,9 @@ test.describe("Workspace setup streaming", () => {
     const repo = await createTempGitRepo("setup-open-", {
       paseoConfig: {
         worktree: {
-          setup: ["sh -c 'echo starting setup; for i in $(seq 1 30); do echo tick $i; sleep 1; done; echo setup complete'"],
+          setup: [
+            "sh -c 'echo starting setup; for i in $(seq 1 30); do echo tick $i; sleep 1; done; echo setup complete'",
+          ],
         },
       },
     });
@@ -77,7 +79,8 @@ test.describe("Workspace setup streaming", () => {
       // so the browser session won't receive progress events).
       const completed = waitForWorkspaceSetupProgress(
         client,
-        (payload) => payload.status === "completed" && payload.detail.log.includes("setup complete"),
+        (payload) =>
+          payload.status === "completed" && payload.detail.log.includes("setup complete"),
       );
       const workspace = await createWorkspaceThroughDaemon(client, {
         cwd: repo.path,
@@ -138,7 +141,8 @@ test.describe("Workspace setup streaming", () => {
       );
       const completed = waitForWorkspaceSetupProgress(
         client,
-        (payload) => payload.status === "completed" && payload.detail.log.includes("setup complete"),
+        (payload) =>
+          payload.status === "completed" && payload.detail.log.includes("setup complete"),
       );
 
       await createWorkspaceThroughDaemon(client, {
@@ -243,7 +247,8 @@ test.describe("Workspace setup streaming", () => {
       // Wait for setup completion via daemon (setup snapshots are per-session)
       const completed = waitForWorkspaceSetupProgress(
         client,
-        (payload) => payload.status === "completed" && payload.detail.log.includes("setup complete"),
+        (payload) =>
+          payload.status === "completed" && payload.detail.log.includes("setup complete"),
       );
       const workspace = await createWorkspaceThroughDaemon(client, {
         cwd: repo.path,
@@ -296,7 +301,8 @@ test.describe("Workspace setup streaming", () => {
       await seedProjectForWorkspaceSetup(client, repo.path);
       const completed = waitForWorkspaceSetupProgress(
         client,
-        (payload) => payload.status === "completed" && payload.detail.log.includes("setup complete"),
+        (payload) =>
+          payload.status === "completed" && payload.detail.log.includes("setup complete"),
       );
 
       const result = await client.createPaseoWorktree({
