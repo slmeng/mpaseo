@@ -13,7 +13,7 @@ type WorkspaceSetupDaemonClient = {
   close(): Promise<void>;
   openProject(cwd: string): Promise<{
     workspace: {
-      id: number;
+      id: string;
       name: string;
       workspaceDirectory: string;
       projectRootPath: string;
@@ -22,7 +22,7 @@ type WorkspaceSetupDaemonClient = {
   }>;
   createPaseoWorktree(input: { cwd: string; worktreeSlug?: string }): Promise<{
     workspace: {
-      id: number;
+      id: string;
       name: string;
       workspaceDirectory: string;
       projectRootPath: string;
@@ -31,7 +31,7 @@ type WorkspaceSetupDaemonClient = {
   }>;
   fetchWorkspaces(): Promise<{
     entries: Array<{
-      id: number;
+      id: string;
       name: string;
       workspaceDirectory: string;
       projectRootPath: string;
@@ -302,18 +302,13 @@ export async function fetchWorkspaceById(
   client: WorkspaceSetupDaemonClient,
   workspaceId: string,
 ): Promise<{
-  id: number;
+  id: string;
   name: string;
   workspaceDirectory: string;
   projectRootPath: string;
 }> {
-  const parsedWorkspaceId = Number(workspaceId);
-  if (!Number.isInteger(parsedWorkspaceId)) {
-    throw new Error(`Workspace id is not numeric: ${workspaceId}`);
-  }
-
   const payload = await client.fetchWorkspaces();
-  const workspace = payload.entries.find((entry) => entry.id === parsedWorkspaceId) ?? null;
+  const workspace = payload.entries.find((entry) => String(entry.id) === workspaceId) ?? null;
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);
   }

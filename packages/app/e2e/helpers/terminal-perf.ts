@@ -9,7 +9,7 @@ export type TerminalPerfDaemonClient = {
   connect(): Promise<void>;
   close(): Promise<void>;
   openProject(cwd: string): Promise<{
-    workspace: { id: number; name: string; projectRootPath: string } | null;
+    workspace: { id: string; name: string; projectRootPath: string } | null;
     error: string | null;
   }>;
   createTerminal(
