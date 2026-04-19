@@ -1,10 +1,10 @@
 import type { Command } from "commander";
-
-export function addAttachOptions(cmd: Command): Command {
-  return cmd
-    .description("Attach to a running agent's output stream")
-    .argument("<id>", "Agent ID (or prefix)");
-}
+import {
+  clearLine,
+  createInterface,
+  cursorTo,
+  type Interface as ReadlineInterface,
+} from "node:readline";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import { fetchProjectedTimelineItems } from "../../utils/timeline.js";
 import type {
@@ -14,87 +14,212 @@ import type {
   AgentTimelineItem,
 } from "@getpaseo/server";
 
+export function addAttachOptions(cmd: Command): Command {
+  return cmd
+    .description("Attach to a running agent's output stream")
+    .argument("<id>", "Agent ID (or prefix)")
+    .option("-i, --interactive", "Stay attached and send messages from the same terminal");
+}
+
 export interface AgentAttachOptions {
   host?: string;
+  interactive?: boolean;
   [key: string]: unknown;
+}
+
+type PrintedOutput = {
+  endedWithNewline: boolean;
+  deferPromptRefresh: boolean;
+};
+
+type InteractivePromptState = {
+  rl: ReadlineInterface;
+  promptRefreshTimer: ReturnType<typeof setTimeout> | null;
+};
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function buildPermitAllowCommand(params: {
+  host: string;
+  agentId: string;
+  requestId: string;
+}): string {
+  return [
+    "paseo",
+    "permit",
+    "allow",
+    "--host",
+    shellQuote(params.host),
+    shellQuote(params.agentId),
+    shellQuote(params.requestId.slice(0, 8)),
+  ].join(" ");
 }
 
 /**
  * Format and print a timeline item to the terminal
  */
-function printTimelineItem(item: AgentTimelineItem): void {
+function printTimelineItem(item: AgentTimelineItem): PrintedOutput {
   switch (item.type) {
     case "assistant_message":
-      // Print assistant text directly
       process.stdout.write(item.text);
-      break;
+      return {
+        endedWithNewline: item.text.endsWith("\n"),
+        deferPromptRefresh: true,
+      };
 
     case "reasoning":
-      // Print reasoning in a muted color if available
       console.log(`\n[Reasoning] ${item.text}`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
 
     case "tool_call": {
       const toolName = item.name;
       const status = item.status ?? "started";
       console.log(`\n[Tool: ${toolName}] ${status}`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
     }
 
     case "todo": {
       const completed = item.items.filter((i) => i.completed).length;
       const total = item.items.length;
       console.log(`\n[Todo] ${completed}/${total} completed`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
     }
 
     case "error":
       console.error(`\n[Error] ${item.message}`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
 
     case "user_message":
       console.log(`\n[User] ${item.text}`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
 
     default:
-      // Unknown item type, skip
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
   }
 }
 
 /**
  * Format and print a stream event to the terminal
  */
-function printStreamEvent(event: AgentStreamEventPayload): void {
+function printStreamEvent(
+  event: AgentStreamEventPayload,
+  context?: { host: string; agentId: string },
+): PrintedOutput {
   switch (event.type) {
     case "timeline":
-      // Print the timeline item
-      printTimelineItem(event.item);
-      break;
+      return printTimelineItem(event.item);
 
     case "permission_requested":
       console.log(`\n[Permission Required] ${event.request.name}`);
       if (event.request.description) {
         console.log(`  ${event.request.description}`);
       }
-      break;
+      if (context) {
+        console.log(
+          `  Allow: ${buildPermitAllowCommand({
+            host: context.host,
+            agentId: context.agentId,
+            requestId: event.request.id,
+          })}`,
+        );
+      }
+      return { endedWithNewline: true, deferPromptRefresh: false };
 
     case "permission_resolved":
       console.log(`\n[Permission ${event.resolution.behavior}]`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
 
     case "turn_failed":
       console.error(`\n[Turn Failed] ${event.error}`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
 
     case "attention_required":
       console.log(`\n[Attention Required: ${event.reason}]`);
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
 
     default:
-      // Other event types are internal
-      break;
+      return { endedWithNewline: true, deferPromptRefresh: false };
   }
+}
+
+function cancelPromptRefresh(state: InteractivePromptState | null): void {
+  if (!state?.promptRefreshTimer) {
+    return;
+  }
+  clearTimeout(state.promptRefreshTimer);
+  state.promptRefreshTimer = null;
+}
+
+function refreshPrompt(state: InteractivePromptState | null): void {
+  if (!state) {
+    return;
+  }
+  cancelPromptRefresh(state);
+  const rlWithRefresh = state.rl as ReadlineInterface & { _refreshLine?: () => void };
+  if (typeof rlWithRefresh._refreshLine === "function") {
+    rlWithRefresh._refreshLine();
+    return;
+  }
+  state.rl.prompt();
+}
+
+function schedulePromptRefresh(state: InteractivePromptState | null, delayMs = 150): void {
+  if (!state) {
+    return;
+  }
+  cancelPromptRefresh(state);
+  state.promptRefreshTimer = setTimeout(() => {
+    state.promptRefreshTimer = null;
+    refreshPrompt(state);
+  }, delayMs);
+}
+
+function prepareInteractiveOutput(state: InteractivePromptState | null): void {
+  if (!state) {
+    return;
+  }
+  cancelPromptRefresh(state);
+  if (process.stdout.isTTY) {
+    clearLine(process.stdout, 0);
+    cursorTo(process.stdout, 0);
+  }
+}
+
+function renderInteractiveOutput(
+  state: InteractivePromptState | null,
+  render: () => PrintedOutput,
+): void {
+  if (!state) {
+    render();
+    return;
+  }
+
+  prepareInteractiveOutput(state);
+  const output = render();
+  if (output.deferPromptRefresh) {
+    schedulePromptRefresh(state);
+    return;
+  }
+  if (!output.endedWithNewline) {
+    process.stdout.write("\n");
+  }
+  refreshPrompt(state);
+}
+
+function printInteractiveHelp(state: InteractivePromptState | null): void {
+  renderInteractiveOutput(state, () => {
+    console.log("\n[Interactive commands]");
+    console.log("  /help       Show this help");
+    console.log("  /interrupt  Stop the current agent turn");
+    console.log("  /quit       Detach from the agent");
+    console.log("  /exit       Detach from the agent");
+    return { endedWithNewline: true, deferPromptRefresh: false };
+  });
 }
 
 /**
@@ -106,10 +231,16 @@ export async function runAttachCommand(
   _command: Command,
 ): Promise<void> {
   const host = getDaemonHost({ host: options.host as string | undefined });
+  const interactive = options.interactive === true;
 
   if (!id) {
     console.error("Error: Agent ID required");
     console.error("Usage: paseo attach <id>");
+    process.exit(1);
+  }
+
+  if (interactive && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    console.error("Error: --interactive requires a TTY on both stdin and stdout");
     process.exit(1);
   }
 
@@ -133,11 +264,13 @@ export async function runAttachCommand(
     }
     const resolvedId = fetchResult.agent.id;
 
-    // Print header
     console.log(`Attaching to agent ${resolvedId.substring(0, 7)}...`);
-    console.log(`(Press Ctrl+C to detach)\n`);
+    if (interactive) {
+      console.log("(Press Ctrl+C to detach, type /help for interactive commands)\n");
+    } else {
+      console.log("(Press Ctrl+C to detach)\n");
+    }
 
-    // Print existing output from timeline fetch.
     try {
       const timelineItems = await fetchProjectedTimelineItems({
         client,
@@ -146,44 +279,112 @@ export async function runAttachCommand(
       for (const item of timelineItems) {
         printTimelineItem(item);
       }
+      if (interactive && timelineItems.length > 0) {
+        process.stdout.write("\n");
+      }
     } catch (error) {
       console.warn("Warning: failed to fetch existing timeline", error);
     }
 
-    // Subscribe to new events
+    const interactiveState: InteractivePromptState | null = interactive
+      ? {
+          rl: createInterface({
+            input: process.stdin,
+            output: process.stdout,
+            prompt: "> ",
+          }),
+          promptRefreshTimer: null,
+        }
+      : null;
+
     const unsubscribe = client.on("agent_stream", (msg: unknown) => {
       const message = msg as AgentStreamMessage;
       if (message.type !== "agent_stream") return;
       if (message.payload.agentId !== resolvedId) return;
 
-      printStreamEvent(message.payload.event);
+      renderInteractiveOutput(interactiveState, () =>
+        printStreamEvent(message.payload.event, {
+          host,
+          agentId: resolvedId,
+        }),
+      );
     });
 
-    // Handle Ctrl+C to detach gracefully
     let detached = false;
+    let resolveDetached: (() => void) | null = null;
+    const detachedPromise = new Promise<void>((resolve) => {
+      resolveDetached = resolve;
+    });
+
     const detach = () => {
       if (detached) return;
       detached = true;
-
-      console.log("\n\nDetaching from agent...");
+      cancelPromptRefresh(interactiveState);
+      process.off("SIGINT", detach);
+      process.off("SIGTERM", detach);
       unsubscribe();
-      client
-        .close()
-        .then(() => {
-          process.exit(0);
-        })
-        .catch(() => {
-          process.exit(1);
-        });
+      interactiveState?.rl.removeAllListeners();
+      interactiveState?.rl.close();
+      console.log("\n\nDetaching from agent...");
+      void client.close().finally(() => {
+        resolveDetached?.();
+      });
     };
+
+    if (interactiveState) {
+      let commandQueue = Promise.resolve();
+      interactiveState.rl.on("line", (line) => {
+        commandQueue = commandQueue
+          .then(async () => {
+            const text = line.trim();
+            if (!text) {
+              refreshPrompt(interactiveState);
+              return;
+            }
+            if (text === "/quit" || text === "/exit") {
+              detach();
+              return;
+            }
+            if (text === "/help") {
+              printInteractiveHelp(interactiveState);
+              return;
+            }
+            if (text === "/interrupt") {
+              prepareInteractiveOutput(interactiveState);
+              try {
+                await client.cancelAgent(resolvedId);
+                console.log("\n[Interrupted current agent turn]");
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error(`\n[Interrupt failed] ${message}`);
+              }
+              refreshPrompt(interactiveState);
+              return;
+            }
+
+            prepareInteractiveOutput(interactiveState);
+            try {
+              await client.sendAgentMessage(resolvedId, text);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              console.error(`\n[Send failed] ${message}`);
+              refreshPrompt(interactiveState);
+            }
+          })
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`\n[Interactive error] ${message}`);
+            refreshPrompt(interactiveState);
+          });
+      });
+      interactiveState.rl.on("SIGINT", detach);
+      refreshPrompt(interactiveState);
+    }
 
     process.on("SIGINT", detach);
     process.on("SIGTERM", detach);
 
-    // Keep the process alive
-    await new Promise(() => {
-      // Wait indefinitely until interrupted
-    });
+    await detachedPromise;
   } catch (err) {
     await client.close().catch(() => {});
     const message = err instanceof Error ? err.message : String(err);
