@@ -1,5 +1,4 @@
 import type { Command } from "commander";
-import { createRequire } from "node:module";
 import {
   getOrCreateServerId,
   findExecutable,
@@ -7,6 +6,7 @@ import {
   execCommand,
 } from "@getpaseo/server";
 import { tryConnectToDaemon } from "../../utils/client.js";
+import { resolveCliVersionOrUnknown } from "../../utils/cli-version.js";
 import type { CommandOptions, ListResult, OutputSchema } from "../../output/index.js";
 import { resolveLocalDaemonState, resolveTcpHostFromListen } from "./local-daemon.js";
 import { resolveNodePathFromPid } from "./runtime-toolchain.js";
@@ -44,12 +44,6 @@ interface StatusRow {
   value: string;
 }
 
-type CliPackageJson = {
-  version?: unknown;
-};
-
-const require = createRequire(import.meta.url);
-
 function normalizeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -69,18 +63,6 @@ function appendNote(current: string | undefined, next: string | undefined): stri
   if (!next) return current;
   if (!current) return next;
   return `${current}; ${next}`;
-}
-
-function resolveCliVersion(): string {
-  try {
-    const packageJson = require("../../../package.json") as CliPackageJson;
-    if (typeof packageJson.version === "string" && packageJson.version.trim().length > 0) {
-      return packageJson.version.trim();
-    }
-  } catch {
-    // Fall through.
-  }
-  return "unknown";
 }
 
 function createStatusSchema(status: DaemonStatus): OutputSchema<StatusRow> {
@@ -287,7 +269,7 @@ export async function runStatusCommand(
     note = appendNote(note, "Daemon is configured for unix socket listen; API probe skipped");
   }
 
-  const cliVersion = resolveCliVersion();
+  const cliVersion = resolveCliVersionOrUnknown();
 
   let serverId: string | null = null;
   try {
