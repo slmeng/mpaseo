@@ -35,6 +35,14 @@ type PrintedOutput = {
 type InteractivePromptState = {
   rl: ReadlineInterface;
   promptRefreshTimer: ReturnType<typeof setTimeout> | null;
+  assistantStreaming: boolean;
+  promptNeedsNewline: boolean;
+};
+
+type LiveAttachState = {
+  reasoningBuffer: string;
+  reasoningFlushTimer: ReturnType<typeof setTimeout> | null;
+  lastToolStatusByCallId: Map<string, string>;
 };
 
 function shellQuote(value: string): string {
@@ -190,15 +198,41 @@ function prepareInteractiveOutput(state: InteractivePromptState | null): void {
   }
 }
 
+function finishAssistantStreamingIfNeeded(state: InteractivePromptState | null): void {
+  if (!state?.assistantStreaming) {
+    return;
+  }
+  state.assistantStreaming = false;
+  if (state.promptNeedsNewline) {
+    process.stdout.write("\n");
+    state.promptNeedsNewline = false;
+  }
+}
+
 function renderInteractiveOutput(
   state: InteractivePromptState | null,
   render: () => PrintedOutput,
+  options?: { isAssistantChunk?: boolean },
 ): void {
   if (!state) {
     render();
     return;
   }
 
+  const isAssistantChunk = options?.isAssistantChunk === true;
+
+  if (isAssistantChunk) {
+    cancelPromptRefresh(state);
+    if (!state.assistantStreaming) {
+      prepareInteractiveOutput(state);
+    }
+    const output = render();
+    state.assistantStreaming = true;
+    state.promptNeedsNewline = !output.endedWithNewline;
+    return;
+  }
+
+  finishAssistantStreamingIfNeeded(state);
   prepareInteractiveOutput(state);
   const output = render();
   if (output.deferPromptRefresh) {
@@ -220,6 +254,59 @@ function printInteractiveHelp(state: InteractivePromptState | null): void {
     console.log("  /exit       Detach from the agent");
     return { endedWithNewline: true, deferPromptRefresh: false };
   });
+}
+
+function cancelReasoningFlush(state: LiveAttachState): void {
+  if (!state.reasoningFlushTimer) {
+    return;
+  }
+  clearTimeout(state.reasoningFlushTimer);
+  state.reasoningFlushTimer = null;
+}
+
+function normalizeReasoningText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function flushReasoningBuffer(
+  liveState: LiveAttachState,
+  interactiveState: InteractivePromptState | null,
+): void {
+  cancelReasoningFlush(liveState);
+  const reasoning = normalizeReasoningText(liveState.reasoningBuffer);
+  if (!reasoning) {
+    liveState.reasoningBuffer = "";
+    return;
+  }
+  liveState.reasoningBuffer = "";
+  renderInteractiveOutput(interactiveState, () => {
+    console.log(`\n[Reasoning] ${reasoning}`);
+    return { endedWithNewline: true, deferPromptRefresh: false };
+  });
+}
+
+function scheduleReasoningFlush(
+  liveState: LiveAttachState,
+  interactiveState: InteractivePromptState | null,
+): void {
+  cancelReasoningFlush(liveState);
+  liveState.reasoningFlushTimer = setTimeout(() => {
+    liveState.reasoningFlushTimer = null;
+    flushReasoningBuffer(liveState, interactiveState);
+  }, 250);
+}
+
+function shouldPrintToolCallUpdate(
+  liveState: LiveAttachState,
+  item: Extract<AgentTimelineItem, { type: "tool_call" }>,
+): boolean {
+  const status = item.status ?? "started";
+  const previousStatus = liveState.lastToolStatusByCallId.get(item.callId);
+  if (previousStatus === status) {
+    return false;
+  }
+  liveState.lastToolStatusByCallId.set(item.callId, status);
+  return true;
 }
 
 /**
@@ -294,19 +381,48 @@ export async function runAttachCommand(
             prompt: "> ",
           }),
           promptRefreshTimer: null,
+          assistantStreaming: false,
+          promptNeedsNewline: false,
         }
       : null;
+    const liveState: LiveAttachState = {
+      reasoningBuffer: "",
+      reasoningFlushTimer: null,
+      lastToolStatusByCallId: new Map(),
+    };
 
     const unsubscribe = client.on("agent_stream", (msg: unknown) => {
       const message = msg as AgentStreamMessage;
       if (message.type !== "agent_stream") return;
       if (message.payload.agentId !== resolvedId) return;
 
-      renderInteractiveOutput(interactiveState, () =>
-        printStreamEvent(message.payload.event, {
-          host,
-          agentId: resolvedId,
-        }),
+      const event = message.payload.event;
+      if (event.type === "timeline") {
+        if (event.item.type === "reasoning") {
+          liveState.reasoningBuffer += event.item.text;
+          scheduleReasoningFlush(liveState, interactiveState);
+          return;
+        }
+
+        flushReasoningBuffer(liveState, interactiveState);
+
+        if (event.item.type === "tool_call" && !shouldPrintToolCallUpdate(liveState, event.item)) {
+          return;
+        }
+      } else {
+        flushReasoningBuffer(liveState, interactiveState);
+      }
+
+      const isAssistantChunk = event.type === "timeline" && event.item.type === "assistant_message";
+
+      renderInteractiveOutput(
+        interactiveState,
+        () =>
+          printStreamEvent(event, {
+            host,
+            agentId: resolvedId,
+          }),
+        { isAssistantChunk },
       );
     });
 
@@ -320,6 +436,8 @@ export async function runAttachCommand(
       if (detached) return;
       detached = true;
       cancelPromptRefresh(interactiveState);
+      finishAssistantStreamingIfNeeded(interactiveState);
+      flushReasoningBuffer(liveState, interactiveState);
       process.off("SIGINT", detach);
       process.off("SIGTERM", detach);
       unsubscribe();
@@ -338,6 +456,8 @@ export async function runAttachCommand(
           .then(async () => {
             const text = line.trim();
             if (!text) {
+              finishAssistantStreamingIfNeeded(interactiveState);
+              flushReasoningBuffer(liveState, interactiveState);
               refreshPrompt(interactiveState);
               return;
             }
@@ -350,6 +470,8 @@ export async function runAttachCommand(
               return;
             }
             if (text === "/interrupt") {
+              finishAssistantStreamingIfNeeded(interactiveState);
+              flushReasoningBuffer(liveState, interactiveState);
               prepareInteractiveOutput(interactiveState);
               try {
                 await client.cancelAgent(resolvedId);
@@ -362,18 +484,24 @@ export async function runAttachCommand(
               return;
             }
 
+            finishAssistantStreamingIfNeeded(interactiveState);
+            flushReasoningBuffer(liveState, interactiveState);
             prepareInteractiveOutput(interactiveState);
             try {
               await client.sendAgentMessage(resolvedId, text);
             } catch (error) {
               const message = error instanceof Error ? error.message : String(error);
               console.error(`\n[Send failed] ${message}`);
+              finishAssistantStreamingIfNeeded(interactiveState);
+              flushReasoningBuffer(liveState, interactiveState);
               refreshPrompt(interactiveState);
             }
           })
           .catch((error) => {
             const message = error instanceof Error ? error.message : String(error);
             console.error(`\n[Interactive error] ${message}`);
+            finishAssistantStreamingIfNeeded(interactiveState);
+            flushReasoningBuffer(liveState, interactiveState);
             refreshPrompt(interactiveState);
           });
       });
