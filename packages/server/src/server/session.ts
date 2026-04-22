@@ -1,8 +1,8 @@
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
+import { TTLCache } from "@isaacs/ttlcache";
+import pMemoize from "p-memoize";
 import type { FSWatcher } from "node:fs";
-import { exec } from "node:child_process";
-import { promisify } from "util";
 import { resolve, sep } from "path";
 import { homedir } from "node:os";
 import { z } from "zod";
@@ -17,6 +17,8 @@ import {
   type FileExplorerRequest,
   type FileDownloadTokenRequest,
   type GitSetupOptions,
+  type CheckoutPrStatusResponse,
+  type CheckoutStatusResponse,
   type ListTerminalsRequest,
   type SubscribeTerminalsRequest,
   type UnsubscribeTerminalsRequest,
@@ -40,6 +42,7 @@ import {
 } from "./messages.js";
 import type { TerminalManager, TerminalsChangedEvent } from "../terminal/terminal-manager.js";
 import { captureTerminalLines, type TerminalSession } from "../terminal/terminal.js";
+import { TerminalOutputCoalescer } from "../terminal/terminal-output-coalescer.js";
 import {
   TerminalStreamOpcode,
   encodeTerminalSnapshotPayload,
@@ -73,9 +76,9 @@ import { experimental_createMCPClient } from "ai";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
 import { buildWorkspaceScriptPayloads } from "./script-status-projection.js";
+import { deriveProjectSlug } from "./workspace-git-metadata.js";
 import type { ScriptHealthState } from "./script-health-monitor.js";
 import { spawnWorkspaceScript } from "./worktree-bootstrap.js";
-import { deriveProjectSlug, readGitCommand } from "./workspace-git-metadata.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import type { DaemonConfigStore } from "./daemon-config-store.js";
 import type { WorkspaceGitRuntimeSnapshot, WorkspaceGitService } from "./workspace-git-service.js";
@@ -86,7 +89,7 @@ import type {
   ProviderOverride,
 } from "./agent/provider-launch-config.js";
 import { AgentManager } from "./agent/agent-manager.js";
-import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
+import { ProviderSnapshotManager, resolveSnapshotCwd } from "./agent/provider-snapshot-manager.js";
 import type {
   AgentTimelineCursor,
   AgentTimelineFetchDirection,
@@ -163,23 +166,19 @@ import { type WorktreeConfig } from "../utils/worktree.js";
 import { runAsyncWorktreeBootstrap } from "./worktree-bootstrap.js";
 import type { ScriptRouteStore } from "./script-proxy.js";
 import {
-  getCheckoutDiff,
-  getCachedCheckoutShortstat,
-  getCheckoutStatus,
-  listBranchSuggestions,
+  checkoutResolvedBranch,
+  type CheckoutExistingBranchResult,
   commitChanges,
   mergeToBase,
   mergeFromBase,
   pullCurrentBranch,
   pushCurrentBranch,
   createPullRequest,
-  searchGitHubIssuesAndPrs,
-  warmCheckoutShortstatInBackground,
 } from "../utils/checkout-git.js";
 import { getProjectIcon } from "../utils/project-icon.js";
 import { expandTilde } from "../utils/path.js";
 import { searchHomeDirectories, searchWorkspaceEntries } from "../utils/directory-suggestions.js";
-import { READ_ONLY_GIT_ENV, toCheckoutError } from "./checkout-git-utils.js";
+import { toCheckoutError } from "./checkout-git-utils.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import type { LocalSpeechModelId } from "./speech/providers/local/models.js";
 import { toResolver, type Resolvable } from "./speech/provider-resolver.js";
@@ -191,7 +190,11 @@ import { notifyChatMentions } from "./chat/chat-mentions.js";
 import { LoopService } from "./loop-service.js";
 import { ScheduleService } from "./schedule/service.js";
 import { execCommand } from "../utils/spawn.js";
-import { createGitHubService, type GitHubService } from "../services/github-service.js";
+import {
+  createGitHubService,
+  type GitHubService,
+  type PullRequestTimelineItem,
+} from "../services/github-service.js";
 import {
   createPaseoWorktree,
   type CreatePaseoWorktreeInput,
@@ -210,9 +213,20 @@ import {
 } from "./worktree-session.js";
 import { toWorktreeWireError } from "./worktree-errors.js";
 
-const execAsync = promisify(exec);
 const MAX_INITIAL_AGENT_TITLE_CHARS = Math.min(60, MAX_EXPLICIT_AGENT_TITLE_CHARS);
 const WORKSPACE_GIT_WATCH_REMOVED_FINGERPRINT = "__removed__";
+type GitMutationRefreshReason =
+  | "commit-changes"
+  | "pull"
+  | "push"
+  | "merge-to-base"
+  | "merge-from-base"
+  | "create-pr"
+  | "switch-branch"
+  | "create-branch"
+  | "stash-push"
+  | "stash-pop"
+  | "create-worktree";
 
 // TODO: Remove once all app store clients are on >=0.1.45 and understand arbitrary provider strings.
 // Clients before 0.1.45 validate providers with z.enum(["claude", "codex", "opencode"]) and reject
@@ -223,7 +237,7 @@ const MIN_VERSION_FLEXIBLE_EDITOR_IDS = "0.1.50";
 
 function isAppVersionAtLeast(appVersion: string | null, minVersion: string): boolean {
   if (!appVersion) return false;
-  // Strip RC/prerelease suffix: "0.1.45-rc.4" → "0.1.45"
+  // Strip prerelease suffix: "0.1.45-beta.4" -> "0.1.45"
   const base = appVersion.replace(/-.*$/, "");
   const parts = base.split(".").map(Number);
   const minParts = minVersion.split(".").map(Number);
@@ -318,6 +332,7 @@ type ActiveTerminalStream = {
   slot: number;
   unsubscribe: () => void;
   needsSnapshot: boolean;
+  outputCoalescer: TerminalOutputCoalescer;
 };
 
 export type SessionRuntimeMetrics = {
@@ -435,6 +450,8 @@ const MIN_STREAMING_SEGMENT_BYTES = Math.round(
 );
 const AgentIdSchema = z.string().uuid();
 const VOICE_INTERRUPT_CONFIRMATION_MS = 500;
+const AVAILABLE_EDITOR_TARGETS_CACHE_TTL_MS = 60_000;
+const AVAILABLE_EDITOR_TARGETS_CACHE_KEY = "available";
 
 type VoiceModeBaseConfig = {
   systemPrompt?: string;
@@ -491,6 +508,7 @@ export type SessionOptions = {
   providerSnapshotManager?: ProviderSnapshotManager;
   scriptRouteStore?: ScriptRouteStore;
   scriptRuntimeStore?: WorkspaceScriptRuntimeStore;
+  workspaceSetupSnapshots?: Map<string, WorkspaceSetupSnapshot>;
   onBranchChanged?: (
     workspaceId: string,
     oldBranch: string | null,
@@ -515,6 +533,7 @@ export type SessionOptions = {
   };
   agentProviderRuntimeSettings?: AgentProviderRuntimeSettingsMap;
   providerOverrides?: Record<string, ProviderOverride>;
+  isDev?: boolean;
 };
 
 export type SessionLifecycleIntent =
@@ -529,6 +548,17 @@ export type SessionLifecycleIntent =
       requestId: string;
       reason?: string;
     };
+
+type CheckoutPrStatusPayload = Extract<
+  SessionOutboundMessage,
+  { type: "checkout_pr_status_response" }
+>["payload"];
+type CheckoutPrStatusPayloadStatus = NonNullable<CheckoutPrStatusPayload["status"]>;
+type PullRequestTimelinePayload = Extract<
+  SessionOutboundMessage,
+  { type: "pull_request_timeline_response" }
+>["payload"];
+type PullRequestTimelinePayloadItem = PullRequestTimelinePayload["items"][number];
 
 type VoiceFeatureUnavailableContext = {
   reasonCode: SpeechReadinessSnapshot["voiceFeature"]["reasonCode"];
@@ -680,9 +710,24 @@ export class Session {
   private nextTerminalSlot = 0;
   private inflightRequests = 0;
   private peakInflightRequests = 0;
+  private readonly availableEditorTargetsCache = new TTLCache<
+    string,
+    EditorTargetDescriptorPayload[]
+  >({
+    ttl: AVAILABLE_EDITOR_TARGETS_CACHE_TTL_MS,
+    max: 1,
+    checkAgeOnGet: true,
+  });
+  private readonly getMemoizedAvailableEditorTargets = pMemoize(
+    async () => this.resolveAvailableEditorTargets(),
+    {
+      cache: this.availableEditorTargetsCache,
+      cacheKey: () => AVAILABLE_EDITOR_TARGETS_CACHE_KEY,
+    },
+  );
   private readonly checkoutDiffSubscriptions = new Map<string, () => void>();
   private readonly workspaceGitWatchTargets = new Map<string, WorkspaceGitWatchTarget>();
-  private readonly workspaceSetupSnapshots = new Map<string, WorkspaceSetupSnapshot>();
+  private readonly workspaceSetupSnapshots: Map<string, WorkspaceSetupSnapshot>;
   private readonly workspaceGitFetchSubscriptions = new Map<string, () => void>();
   private readonly workspaceGitSubscriptions = new Map<string, () => void>();
   private readonly registerVoiceSpeakHandler?: (
@@ -698,6 +743,7 @@ export class Session {
   private readonly getSpeechReadiness?: () => SpeechReadinessSnapshot;
   private readonly agentProviderRuntimeSettings: AgentProviderRuntimeSettingsMap | undefined;
   private readonly providerOverrides: Record<string, ProviderOverride> | undefined;
+  private readonly isDev: boolean;
   private voiceModeAgentId: string | null = null;
   private voiceModeBaseConfig: VoiceModeBaseConfig | null = null;
 
@@ -730,6 +776,7 @@ export class Session {
       providerSnapshotManager,
       scriptRouteStore,
       scriptRuntimeStore,
+      workspaceSetupSnapshots,
       onBranchChanged,
       getDaemonTcpPort,
       getDaemonTcpHost,
@@ -739,6 +786,7 @@ export class Session {
       dictation,
       agentProviderRuntimeSettings,
       providerOverrides,
+      isDev,
     } = options;
     this.clientId = clientId;
     this.appVersion = appVersion ?? null;
@@ -770,6 +818,7 @@ export class Session {
     this.providerSnapshotManager = providerSnapshotManager ?? null;
     this.scriptRouteStore = scriptRouteStore ?? null;
     this.scriptRuntimeStore = scriptRuntimeStore ?? null;
+    this.workspaceSetupSnapshots = workspaceSetupSnapshots ?? new Map();
     this.onBranchChanged = onBranchChanged;
     this.getDaemonTcpPort = getDaemonTcpPort ?? null;
     this.getDaemonTcpHost = getDaemonTcpHost ?? null;
@@ -780,7 +829,7 @@ export class Session {
       );
     }
     if (this.providerSnapshotManager) {
-      const handleProviderSnapshotChange = (entries: ProviderSnapshotEntry[], cwd?: string) => {
+      const handleProviderSnapshotChange = (entries: ProviderSnapshotEntry[], cwd: string) => {
         // COMPAT(providersSnapshot): keep provider visibility gating for older clients.
         const visibleEntries = entries.filter((entry) =>
           this.isProviderVisibleToClient(entry.provider),
@@ -807,10 +856,13 @@ export class Session {
     this.getSpeechReadiness = dictation?.getSpeechReadiness;
     this.agentProviderRuntimeSettings = agentProviderRuntimeSettings;
     this.providerOverrides = providerOverrides;
+    this.isDev = isDev === true;
     this.abortController = new AbortController();
     this.providerRegistry = buildProviderRegistry(this.sessionLogger, {
       runtimeSettings: this.agentProviderRuntimeSettings,
       providerOverrides: this.providerOverrides,
+      workspaceGitService: this.workspaceGitService,
+      isDev: this.isDev,
     });
 
     // Initialize per-session managers
@@ -1652,6 +1704,10 @@ export class Session {
 
           case "checkout_pr_status_request":
             await this.handleCheckoutPrStatusRequest(msg);
+            break;
+
+          case "pull_request_timeline_request":
+            await this.handlePullRequestTimelineRequest(msg);
             break;
 
           case "github_search_request":
@@ -2788,6 +2844,9 @@ export class Session {
           explicitTitle,
           paseoHome: this.paseoHome,
           logger: this.sessionLogger,
+          deps: {
+            workspaceGitService: this.workspaceGitService,
+          },
         });
 
         const started = await this.handleSendAgentMessage(
@@ -3024,6 +3083,7 @@ export class Session {
           this.createPaseoWorktree(input, serviceOptions),
         checkoutExistingBranch: (cwd, branch) => this.checkoutExistingBranch(cwd, branch),
         createBranchFromBase: (params) => this.createBranchFromBase(params),
+        github: this.github,
       },
       config,
       gitOptions,
@@ -3035,13 +3095,16 @@ export class Session {
   private async handleListProviderModelsRequest(
     msg: Extract<SessionInboundMessage, { type: "list_provider_models_request" }>,
   ): Promise<void> {
-    const cwd = msg.cwd ? expandTilde(msg.cwd) : undefined;
+    const cwd = resolveSnapshotCwd(msg.cwd ? expandTilde(msg.cwd) : undefined);
     const fetchedAt = new Date().toISOString();
     const manager = this.providerSnapshotManager;
 
     if (!manager) {
       try {
-        const models = await this.providerRegistry[msg.provider].fetchModels({ cwd });
+        const models = await this.providerRegistry[msg.provider].fetchModels({
+          cwd,
+          force: false,
+        });
         this.emit({
           type: "list_provider_models_response",
           payload: {
@@ -3070,16 +3133,7 @@ export class Session {
       return;
     }
 
-    const findEntry = () =>
-      manager.getSnapshot(cwd).find((candidate) => candidate.provider === msg.provider);
-
-    let entry = findEntry();
-    if (!entry || entry.status === "loading") {
-      // Awaits the in-flight warmup (deduped per-cwd) so old clients still get
-      // a resolved answer rather than a loading placeholder.
-      await manager.refresh({ cwd, providers: [msg.provider] });
-      entry = findEntry();
-    }
+    const entry = await this.getProviderSnapshotEntryForRead(cwd, msg.provider);
 
     if (!entry) {
       this.emit({
@@ -3128,9 +3182,60 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "list_provider_modes_request" }>,
   ): Promise<void> {
     const fetchedAt = new Date().toISOString();
+    const cwd = resolveSnapshotCwd(msg.cwd ? expandTilde(msg.cwd) : undefined);
+    const manager = this.providerSnapshotManager;
+
+    if (manager) {
+      const entry = await this.getProviderSnapshotEntryForRead(cwd, msg.provider);
+
+      if (!entry) {
+        this.emit({
+          type: "list_provider_modes_response",
+          payload: {
+            provider: msg.provider,
+            error: `Unknown provider: ${msg.provider}`,
+            fetchedAt,
+            requestId: msg.requestId,
+          },
+        });
+        return;
+      }
+
+      if (entry.status === "ready") {
+        this.emit({
+          type: "list_provider_modes_response",
+          payload: {
+            provider: msg.provider,
+            modes: entry.modes ?? [],
+            error: null,
+            fetchedAt: entry.fetchedAt ?? fetchedAt,
+            requestId: msg.requestId,
+          },
+        });
+        return;
+      }
+
+      const errorMessage =
+        entry.status === "error"
+          ? (entry.error ?? `Failed to list modes for ${msg.provider}`)
+          : `Provider ${msg.provider} is not available`;
+
+      this.emit({
+        type: "list_provider_modes_response",
+        payload: {
+          provider: msg.provider,
+          error: errorMessage,
+          fetchedAt,
+          requestId: msg.requestId,
+        },
+      });
+      return;
+    }
+
     try {
       const modes = await this.providerRegistry[msg.provider].fetchModes({
-        cwd: msg.cwd ? expandTilde(msg.cwd) : undefined,
+        cwd,
+        force: false,
       });
       this.emit({
         type: "list_provider_modes_response",
@@ -3157,6 +3262,28 @@ export class Session {
         },
       });
     }
+  }
+
+  private async getProviderSnapshotEntryForRead(
+    cwd: string,
+    provider: AgentProvider,
+  ): Promise<ProviderSnapshotEntry | undefined> {
+    const manager = this.providerSnapshotManager;
+    if (!manager) {
+      return undefined;
+    }
+
+    const findEntry = () =>
+      manager.getSnapshot(cwd).find((candidate) => candidate.provider === provider);
+
+    let entry = findEntry();
+    if (!entry || entry.status === "loading") {
+      // Awaits the in-flight warmup (deduped per-cwd) so old clients still get
+      // a resolved answer rather than a loading placeholder.
+      await manager.warmUpSnapshotForCwd({ cwd, providers: [provider] });
+      entry = findEntry();
+    }
+    return entry;
   }
 
   private buildDraftAgentSessionConfig(draftConfig: {
@@ -3265,10 +3392,16 @@ export class Session {
   private async handleRefreshProvidersSnapshotRequest(
     msg: Extract<SessionInboundMessage, { type: "refresh_providers_snapshot_request" }>,
   ): Promise<void> {
-    await this.providerSnapshotManager?.refresh({
-      cwd: msg.cwd ? expandTilde(msg.cwd) : undefined,
-      providers: msg.providers,
-    });
+    if (msg.cwd) {
+      await this.providerSnapshotManager?.refreshSnapshotForCwd({
+        cwd: expandTilde(msg.cwd),
+        providers: msg.providers,
+      });
+    } else {
+      await this.providerSnapshotManager?.refreshSettingsSnapshot({
+        providers: msg.providers,
+      });
+    }
     this.emit({
       type: "refresh_providers_snapshot_response",
       payload: {
@@ -3329,11 +3462,10 @@ export class Session {
   }
 
   private async generateCommitMessage(cwd: string): Promise<string> {
-    const diff = await getCheckoutDiff(
-      cwd,
-      { mode: "uncommitted", includeStructured: true },
-      { paseoHome: this.paseoHome },
-    );
+    const diff = await this.workspaceGitService.getCheckoutDiff(cwd, {
+      mode: "uncommitted",
+      includeStructured: true,
+    });
     const schema = z.object({
       message: z
         .string()
@@ -3398,15 +3530,11 @@ export class Session {
     title: string;
     body: string;
   }> {
-    const diff = await getCheckoutDiff(
-      cwd,
-      {
-        mode: "base",
-        baseRef,
-        includeStructured: true,
-      },
-      { paseoHome: this.paseoHome },
-    );
+    const diff = await this.workspaceGitService.getCheckoutDiff(cwd, {
+      mode: "base",
+      baseRef,
+      includeStructured: true,
+    });
     const schema = z.object({
       title: z.string().min(1).max(72),
       body: z.string().min(1),
@@ -3474,34 +3602,29 @@ export class Session {
 
   private async isWorkingTreeDirty(cwd: string): Promise<boolean> {
     try {
-      const { stdout } = await execAsync("git status --porcelain", {
-        cwd,
-        env: READ_ONLY_GIT_ENV,
-      });
-      return stdout.trim().length > 0;
+      const snapshot = await this.workspaceGitService.getSnapshot(cwd);
+      return snapshot.git.isDirty === true;
     } catch (error) {
       throw new Error(`Unable to inspect git status for ${cwd}: ${(error as Error).message}`);
     }
   }
 
-  private async checkoutExistingBranch(cwd: string, branch: string): Promise<void> {
+  private async checkoutExistingBranch(
+    cwd: string,
+    branch: string,
+  ): Promise<CheckoutExistingBranchResult> {
     this.assertSafeGitRef(branch, "branch");
-    try {
-      await execCommand("git", ["rev-parse", "--verify", branch], { cwd });
-    } catch (error) {
+    const resolution = await this.workspaceGitService.validateBranchRef(cwd, branch);
+    if (resolution.kind === "not-found") {
       throw new Error(`Branch not found: ${branch}`);
     }
-
-    const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD", {
-      cwd,
-    });
-    const current = stdout.trim();
-    if (current === branch) {
-      return;
-    }
-
     await this.ensureCleanWorkingTree(cwd);
-    await execCommand("git", ["checkout", branch], { cwd });
+    const result = await checkoutResolvedBranch({
+      cwd,
+      resolution,
+    });
+    await this.notifyGitMutation(cwd, "switch-branch", { invalidateGithub: true });
+    return result;
   }
 
   private async createBranchFromBase(params: {
@@ -3513,9 +3636,8 @@ export class Session {
     this.assertSafeGitRef(baseBranch, "base branch");
     this.assertSafeGitRef(newBranchName, "new branch");
 
-    try {
-      await execCommand("git", ["rev-parse", "--verify", baseBranch], { cwd });
-    } catch (error) {
+    const baseResolution = await this.workspaceGitService.validateBranchRef(cwd, baseBranch);
+    if (baseResolution.kind === "not-found") {
       throw new Error(`Base branch not found: ${baseBranch}`);
     }
 
@@ -3528,17 +3650,29 @@ export class Session {
     await execCommand("git", ["checkout", "-b", newBranchName, baseBranch], {
       cwd,
     });
+    await this.notifyGitMutation(cwd, "create-branch");
   }
 
   private async doesLocalBranchExist(cwd: string, branch: string): Promise<boolean> {
     this.assertSafeGitRef(branch, "branch");
+    return this.workspaceGitService.hasLocalBranch(cwd, branch);
+  }
+
+  private async notifyGitMutation(
+    cwd: string,
+    reason: GitMutationRefreshReason,
+    options?: { invalidateGithub?: boolean },
+  ): Promise<void> {
+    if (options?.invalidateGithub) {
+      this.github.invalidate({ cwd });
+    }
     try {
-      await execCommand("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
-        cwd,
-      });
-      return true;
-    } catch (error: any) {
-      return false;
+      await this.workspaceGitService.getSnapshot(cwd, { force: true, reason });
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, cwd, reason },
+        "Failed to force-refresh workspace git snapshot after mutation",
+      );
     }
   }
 
@@ -3915,72 +4049,14 @@ export class Session {
     const resolvedCwd = expandTilde(cwd);
 
     try {
-      const status = await getCheckoutStatus(resolvedCwd, { paseoHome: this.paseoHome });
-      if (!status.isGit) {
-        this.emit({
-          type: "checkout_status_response",
-          payload: {
-            cwd,
-            isGit: false,
-            repoRoot: null,
-            currentBranch: null,
-            isDirty: null,
-            baseRef: null,
-            aheadBehind: null,
-            aheadOfOrigin: null,
-            behindOfOrigin: null,
-            hasRemote: false,
-            remoteUrl: null,
-            isPaseoOwnedWorktree: false,
-            error: null,
-            requestId,
-          },
-        });
-        return;
-      }
-
-      if (status.isPaseoOwnedWorktree) {
-        this.emit({
-          type: "checkout_status_response",
-          payload: {
-            cwd,
-            isGit: true,
-            repoRoot: status.repoRoot ?? null,
-            mainRepoRoot: status.mainRepoRoot,
-            currentBranch: status.currentBranch ?? null,
-            isDirty: status.isDirty ?? null,
-            baseRef: status.baseRef,
-            aheadBehind: status.aheadBehind ?? null,
-            aheadOfOrigin: status.aheadOfOrigin ?? null,
-            behindOfOrigin: status.behindOfOrigin ?? null,
-            hasRemote: status.hasRemote,
-            remoteUrl: status.remoteUrl,
-            isPaseoOwnedWorktree: true,
-            error: null,
-            requestId,
-          },
-        });
-        return;
-      }
-
+      const snapshot = await this.workspaceGitService.getSnapshot(resolvedCwd);
       this.emit({
         type: "checkout_status_response",
-        payload: {
+        payload: this.buildCheckoutStatusPayloadFromSnapshot({
           cwd,
-          isGit: true,
-          repoRoot: status.repoRoot ?? null,
-          currentBranch: status.currentBranch ?? null,
-          isDirty: status.isDirty ?? null,
-          baseRef: status.baseRef ?? null,
-          aheadBehind: status.aheadBehind ?? null,
-          aheadOfOrigin: status.aheadOfOrigin ?? null,
-          behindOfOrigin: status.behindOfOrigin ?? null,
-          hasRemote: status.hasRemote,
-          remoteUrl: status.remoteUrl,
-          isPaseoOwnedWorktree: false,
-          error: null,
           requestId,
-        },
+          snapshot,
+        }),
       });
     } catch (error) {
       this.emit({
@@ -4014,59 +4090,49 @@ export class Session {
       const resolvedCwd = expandTilde(cwd);
       this.assertSafeGitRef(branchName, "branch");
 
-      // Try local branch first
-      try {
-        await execCommand("git", ["rev-parse", "--verify", branchName], {
-          cwd: resolvedCwd,
-          env: READ_ONLY_GIT_ENV,
-        });
-        this.emit({
-          type: "validate_branch_response",
-          payload: {
-            exists: true,
-            resolvedRef: branchName,
-            isRemote: false,
-            error: null,
-            requestId,
-          },
-        });
-        return;
-      } catch {
-        // Local branch doesn't exist, try remote
+      const resolution = await this.workspaceGitService.validateBranchRef(resolvedCwd, branchName);
+      switch (resolution.kind) {
+        case "local":
+          this.emit({
+            type: "validate_branch_response",
+            payload: {
+              exists: true,
+              resolvedRef: resolution.name,
+              isRemote: false,
+              error: null,
+              requestId,
+            },
+          });
+          return;
+        case "remote-only":
+          this.emit({
+            type: "validate_branch_response",
+            payload: {
+              exists: true,
+              resolvedRef: resolution.remoteRef,
+              isRemote: true,
+              error: null,
+              requestId,
+            },
+          });
+          return;
+        case "not-found":
+          this.emit({
+            type: "validate_branch_response",
+            payload: {
+              exists: false,
+              resolvedRef: null,
+              isRemote: false,
+              error: null,
+              requestId,
+            },
+          });
+          return;
+        default: {
+          const exhaustiveCheck: never = resolution;
+          throw new Error(`Unhandled branch resolution: ${exhaustiveCheck}`);
+        }
       }
-
-      // Try remote branch (origin/{branchName})
-      try {
-        await execCommand("git", ["rev-parse", "--verify", `origin/${branchName}`], {
-          cwd: resolvedCwd,
-          env: READ_ONLY_GIT_ENV,
-        });
-        this.emit({
-          type: "validate_branch_response",
-          payload: {
-            exists: true,
-            resolvedRef: `origin/${branchName}`,
-            isRemote: true,
-            error: null,
-            requestId,
-          },
-        });
-        return;
-      } catch {
-        // Remote branch doesn't exist either
-      }
-
-      // Branch not found anywhere
-      this.emit({
-        type: "validate_branch_response",
-        payload: {
-          exists: false,
-          resolvedRef: null,
-          isRemote: false,
-          error: null,
-          requestId,
-        },
-      });
     } catch (error) {
       this.emit({
         type: "validate_branch_response",
@@ -4088,11 +4154,15 @@ export class Session {
 
     try {
       const resolvedCwd = expandTilde(cwd);
-      const branches = await listBranchSuggestions(resolvedCwd, { query, limit });
+      const branchDetails = await this.workspaceGitService.suggestBranchesForCwd(resolvedCwd, {
+        query,
+        limit,
+      });
       this.emit({
         type: "branch_suggestions_response",
         payload: {
-          branches,
+          branches: branchDetails.map((branch) => branch.name),
+          branchDetails,
           error: null,
           requestId,
         },
@@ -4102,6 +4172,7 @@ export class Session {
         type: "branch_suggestions_response",
         payload: {
           branches: [],
+          branchDetails: [],
           error: error instanceof Error ? error.message : String(error),
           requestId,
         },
@@ -4116,7 +4187,10 @@ export class Session {
 
     try {
       const resolvedCwd = expandTilde(cwd);
-      const result = await searchGitHubIssuesAndPrs(resolvedCwd, query, limit, this.github, {
+      const result = await this.github.searchIssuesAndPrs({
+        cwd: resolvedCwd,
+        query,
+        limit,
         kinds,
       });
       this.emit({
@@ -4291,9 +4365,13 @@ export class Session {
       return;
     }
 
-    const subscription = await this.workspaceGitService.subscribe({ cwd: normalizedCwd }, () => {
-      void this.emitWorkspaceUpdateForCwd(normalizedCwd);
-    });
+    const subscription = await this.workspaceGitService.subscribe(
+      { cwd: normalizedCwd },
+      (snapshot) => {
+        void this.emitWorkspaceUpdateForCwd(normalizedCwd);
+        this.emitCheckoutStatusUpdate(normalizedCwd, snapshot);
+      },
+    );
     this.workspaceGitSubscriptions.set(normalizedCwd, subscription.unsubscribe);
   }
 
@@ -4332,13 +4410,136 @@ export class Session {
     this.checkoutDiffSubscriptions.delete(msg.subscriptionId);
   }
 
+  private buildCheckoutStatusPayloadFromSnapshot({
+    cwd,
+    requestId,
+    snapshot,
+  }: {
+    cwd: string;
+    requestId: string;
+    snapshot: WorkspaceGitRuntimeSnapshot;
+  }): CheckoutStatusResponse["payload"] {
+    if (!snapshot.git.isGit) {
+      return {
+        cwd,
+        isGit: false,
+        repoRoot: null,
+        currentBranch: null,
+        isDirty: null,
+        baseRef: null,
+        aheadBehind: null,
+        aheadOfOrigin: null,
+        behindOfOrigin: null,
+        hasRemote: false,
+        remoteUrl: null,
+        isPaseoOwnedWorktree: false,
+        error: null,
+        requestId,
+      };
+    }
+
+    if (snapshot.git.repoRoot === null || snapshot.git.isDirty === null) {
+      throw new Error("Workspace git snapshot is missing required checkout status fields");
+    }
+
+    if (snapshot.git.isPaseoOwnedWorktree) {
+      if (snapshot.git.mainRepoRoot === null || snapshot.git.baseRef === null) {
+        throw new Error("Workspace git snapshot is missing required worktree status fields");
+      }
+
+      return {
+        cwd,
+        isGit: true,
+        repoRoot: snapshot.git.repoRoot,
+        mainRepoRoot: snapshot.git.mainRepoRoot,
+        currentBranch: snapshot.git.currentBranch ?? null,
+        isDirty: snapshot.git.isDirty,
+        baseRef: snapshot.git.baseRef,
+        aheadBehind: snapshot.git.aheadBehind ?? null,
+        aheadOfOrigin: snapshot.git.aheadOfOrigin ?? null,
+        behindOfOrigin: snapshot.git.behindOfOrigin ?? null,
+        hasRemote: snapshot.git.hasRemote,
+        remoteUrl: snapshot.git.remoteUrl,
+        isPaseoOwnedWorktree: true,
+        error: null,
+        requestId,
+      };
+    }
+
+    return {
+      cwd,
+      isGit: true,
+      repoRoot: snapshot.git.repoRoot,
+      currentBranch: snapshot.git.currentBranch ?? null,
+      isDirty: snapshot.git.isDirty,
+      baseRef: snapshot.git.baseRef ?? null,
+      aheadBehind: snapshot.git.aheadBehind ?? null,
+      aheadOfOrigin: snapshot.git.aheadOfOrigin ?? null,
+      behindOfOrigin: snapshot.git.behindOfOrigin ?? null,
+      hasRemote: snapshot.git.hasRemote,
+      remoteUrl: snapshot.git.remoteUrl,
+      isPaseoOwnedWorktree: false,
+      error: null,
+      requestId,
+    };
+  }
+
+  private buildCheckoutPrStatusPayloadFromSnapshot({
+    cwd,
+    requestId,
+    snapshot,
+  }: {
+    cwd: string;
+    requestId: string;
+    snapshot: WorkspaceGitRuntimeSnapshot;
+  }): CheckoutPrStatusResponse["payload"] {
+    return {
+      cwd,
+      status: normalizeCheckoutPrStatusPayload(snapshot.github.pullRequest),
+      githubFeaturesEnabled: snapshot.github.featuresEnabled,
+      error: snapshot.github.error
+        ? {
+            code: "UNKNOWN",
+            message: snapshot.github.error.message,
+          }
+        : null,
+      requestId,
+    };
+  }
+
+  private emitCheckoutStatusUpdate(cwd: string, snapshot: WorkspaceGitRuntimeSnapshot): void {
+    try {
+      const requestId = `subscription:${cwd}`;
+      this.emit({
+        type: "checkout_status_update",
+        payload: {
+          ...this.buildCheckoutStatusPayloadFromSnapshot({
+            cwd,
+            requestId,
+            snapshot,
+          }),
+          prStatus: this.buildCheckoutPrStatusPayloadFromSnapshot({
+            cwd,
+            requestId,
+            snapshot,
+          }),
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, cwd },
+        "Failed to emit workspace checkout status update",
+      );
+    }
+  }
+
   private async handleCheckoutSwitchBranchRequest(
     msg: Extract<SessionInboundMessage, { type: "checkout_switch_branch_request" }>,
   ): Promise<void> {
     const { cwd, branch, requestId } = msg;
 
     try {
-      await this.checkoutExistingBranch(cwd, branch);
+      const checkoutResult = await this.checkoutExistingBranch(cwd, branch);
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
 
       // Push a workspace_update immediately so the sidebar/header reflect
@@ -4351,6 +4552,7 @@ export class Session {
           cwd,
           success: true,
           branch,
+          source: checkoutResult.source,
           error: null,
           requestId,
         },
@@ -4385,6 +4587,7 @@ export class Session {
         ? `${Session.PASEO_STASH_PREFIX} ${branchLabel}`
         : `${Session.PASEO_STASH_PREFIX} unnamed`;
       await execCommand("git", ["stash", "push", "--include-untracked", "-m", message], { cwd });
+      await this.notifyGitMutation(cwd, "stash-push");
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
       this.emit({
         type: "stash_save_response",
@@ -4404,6 +4607,7 @@ export class Session {
     const { cwd, stashIndex, requestId } = msg;
     try {
       await execCommand("git", ["stash", "pop", `stash@{${stashIndex}}`], { cwd });
+      await this.notifyGitMutation(cwd, "stash-pop");
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
       this.emit({
         type: "stash_pop_response",
@@ -4423,35 +4627,7 @@ export class Session {
     const { cwd, requestId } = msg;
     const paseoOnly = msg.paseoOnly !== false;
     try {
-      const { stdout } = await execAsync("git stash list --format=%gd%x00%s", {
-        cwd,
-        env: READ_ONLY_GIT_ENV,
-      });
-      const lines = stdout.trim().split("\n").filter(Boolean);
-      const entries: Array<{
-        index: number;
-        message: string;
-        branch: string | null;
-        isPaseo: boolean;
-      }> = [];
-
-      for (const line of lines) {
-        const sepIdx = line.indexOf("\0");
-        if (sepIdx < 0) continue;
-        const refPart = line.slice(0, sepIdx);
-        const subject = line.slice(sepIdx + 1);
-        const indexMatch = refPart.match(/\{(\d+)\}/);
-        if (!indexMatch) continue;
-        const index = Number(indexMatch[1]);
-        const prefixIdx = subject.indexOf(Session.PASEO_STASH_PREFIX);
-        const isPaseo = prefixIdx >= 0;
-        const branch = isPaseo
-          ? subject.slice(prefixIdx + Session.PASEO_STASH_PREFIX.length).trim() || null
-          : null;
-
-        if (paseoOnly && !isPaseo) continue;
-        entries.push({ index, message: subject, branch, isPaseo });
-      }
+      const entries = await this.workspaceGitService.listStashes(cwd, { paseoOnly });
 
       this.emit({
         type: "stash_list_response",
@@ -4483,6 +4659,7 @@ export class Session {
         message,
         addAll: msg.addAll ?? true,
       });
+      await this.notifyGitMutation(cwd, "commit-changes");
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
 
       this.emit({
@@ -4513,35 +4690,18 @@ export class Session {
     const { cwd, requestId } = msg;
 
     try {
-      const status = await getCheckoutStatus(cwd, { paseoHome: this.paseoHome });
-      if (!status.isGit) {
-        try {
-          await execAsync("git rev-parse --is-inside-work-tree", {
-            cwd,
-            env: READ_ONLY_GIT_ENV,
-          });
-        } catch (error) {
-          const details =
-            typeof (error as any)?.stderr === "string"
-              ? String((error as any).stderr).trim()
-              : error instanceof Error
-                ? error.message
-                : String(error);
-          throw new Error(`Not a git repository: ${cwd}\n${details}`.trim());
-        }
+      const snapshot = await this.workspaceGitService.getSnapshot(cwd);
+      if (!snapshot.git.isGit) {
+        throw new Error(`Not a git repository: ${cwd}`);
       }
 
       if (msg.requireCleanTarget) {
-        const { stdout } = await execAsync("git status --porcelain", {
-          cwd,
-          env: READ_ONLY_GIT_ENV,
-        });
-        if (stdout.trim().length > 0) {
+        if (snapshot.git.isDirty) {
           throw new Error("Working directory has uncommitted changes.");
         }
       }
 
-      let baseRef = msg.baseRef ?? (status.isGit ? status.baseRef : null);
+      let baseRef = msg.baseRef ?? snapshot.git.baseRef;
       if (!baseRef) {
         throw new Error("Base branch is required for merge");
       }
@@ -4549,7 +4709,7 @@ export class Session {
         baseRef = baseRef.slice("origin/".length);
       }
 
-      await mergeToBase(
+      const mutatedCwd = await mergeToBase(
         cwd,
         {
           baseRef,
@@ -4557,6 +4717,10 @@ export class Session {
         },
         { paseoHome: this.paseoHome },
       );
+      await Promise.all([
+        this.notifyGitMutation(mutatedCwd, "merge-to-base", { invalidateGithub: true }),
+        ...(mutatedCwd !== cwd ? [this.notifyGitMutation(cwd, "merge-to-base")] : []),
+      ]);
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
 
       this.emit({
@@ -4588,11 +4752,8 @@ export class Session {
 
     try {
       if (msg.requireCleanTarget ?? true) {
-        const { stdout } = await execAsync("git status --porcelain", {
-          cwd,
-          env: READ_ONLY_GIT_ENV,
-        });
-        if (stdout.trim().length > 0) {
+        const snapshot = await this.workspaceGitService.getSnapshot(cwd);
+        if (snapshot.git.isDirty) {
           throw new Error("Working directory has uncommitted changes.");
         }
       }
@@ -4601,6 +4762,7 @@ export class Session {
         baseRef: msg.baseRef,
         requireCleanTarget: msg.requireCleanTarget ?? true,
       });
+      await this.notifyGitMutation(cwd, "merge-from-base", { invalidateGithub: true });
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
 
       this.emit({
@@ -4632,6 +4794,7 @@ export class Session {
 
     try {
       await pullCurrentBranch(cwd);
+      await this.notifyGitMutation(cwd, "pull", { invalidateGithub: true });
       this.checkoutDiffManager.scheduleRefreshForCwd(cwd);
 
       this.emit({
@@ -4663,6 +4826,7 @@ export class Session {
 
     try {
       await pushCurrentBranch(cwd);
+      await this.notifyGitMutation(cwd, "push", { invalidateGithub: true });
       this.emit({
         type: "checkout_push_response",
         payload: {
@@ -4708,7 +4872,9 @@ export class Session {
           base: msg.baseRef,
         },
         this.github,
+        this.workspaceGitService,
       );
+      await this.notifyGitMutation(cwd, "create-pr", { invalidateGithub: true });
 
       this.emit({
         type: "checkout_pr_create_response",
@@ -4745,7 +4911,7 @@ export class Session {
         type: "checkout_pr_status_response",
         payload: {
           cwd,
-          status: snapshot.github.pullRequest,
+          status: normalizeCheckoutPrStatusPayload(snapshot.github.pullRequest),
           githubFeaturesEnabled: snapshot.github.featuresEnabled,
           error: snapshot.github.error
             ? {
@@ -4770,6 +4936,88 @@ export class Session {
     }
   }
 
+  private async handlePullRequestTimelineRequest(
+    msg: Extract<SessionInboundMessage, { type: "pull_request_timeline_request" }>,
+  ): Promise<void> {
+    const { cwd, prNumber, repoOwner, repoName, requestId } = msg;
+
+    if (!isValidPullRequestTimelineIdentity({ prNumber, repoOwner, repoName })) {
+      this.emit({
+        type: "pull_request_timeline_response",
+        payload: {
+          cwd,
+          prNumber,
+          items: [],
+          truncated: false,
+          error: {
+            kind: "unknown",
+            message: "Pull request timeline request has invalid PR identity",
+          },
+          requestId,
+          githubFeaturesEnabled: true,
+        },
+      });
+      return;
+    }
+
+    const githubFeaturesEnabled = await this.github.isAuthenticated({ cwd });
+    if (!githubFeaturesEnabled) {
+      this.emit({
+        type: "pull_request_timeline_response",
+        payload: {
+          cwd,
+          prNumber,
+          items: [],
+          truncated: false,
+          error: {
+            kind: "unknown",
+            message: "GitHub CLI is unavailable or not authenticated",
+          },
+          requestId,
+          githubFeaturesEnabled: false,
+        },
+      });
+      return;
+    }
+
+    try {
+      const timeline = await this.github.getPullRequestTimeline({
+        cwd,
+        prNumber,
+        repoOwner,
+        repoName,
+      });
+      this.emit({
+        type: "pull_request_timeline_response",
+        payload: {
+          cwd,
+          prNumber: timeline.prNumber,
+          items: timeline.items.map(toPullRequestTimelinePayloadItem),
+          truncated: timeline.truncated,
+          error: timeline.error,
+          requestId,
+          githubFeaturesEnabled: true,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "pull_request_timeline_response",
+        payload: {
+          cwd,
+          prNumber,
+          items: [],
+          truncated: false,
+          error: {
+            kind: "unknown",
+            message: error instanceof Error ? error.message : String(error),
+          },
+          requestId,
+          githubFeaturesEnabled: true,
+        },
+      });
+    }
+  }
+
   private async handlePaseoWorktreeListRequest(
     msg: Extract<SessionInboundMessage, { type: "paseo_worktree_list_request" }>,
   ): Promise<void> {
@@ -4777,6 +5025,7 @@ export class Session {
       {
         emit: (message) => this.emit(message),
         paseoHome: this.paseoHome,
+        workspaceGitService: this.workspaceGitService,
       },
       msg,
     );
@@ -4788,6 +5037,8 @@ export class Session {
     return handleWorktreeArchiveRequest(
       {
         paseoHome: this.paseoHome,
+        github: this.github,
+        workspaceGitService: this.workspaceGitService,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         archiveWorkspaceRecord: async (workspaceDirectory) => {
@@ -5430,13 +5681,9 @@ export class Session {
       projectRecord ?? (await this.projectRegistry.get(workspace.projectId));
 
     let diffStat: { additions: number; deletions: number } | null = null;
-    const cachedShortstat = getCachedCheckoutShortstat(workspace.cwd);
-    if (cachedShortstat !== undefined) {
-      diffStat = cachedShortstat;
-    } else {
-      warmCheckoutShortstatInBackground(workspace.cwd, undefined, () => {
-        void this.emitWorkspaceUpdateForCwd(workspace.cwd);
-      });
+    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    if (snapshot?.git.diffStat) {
+      diffStat = snapshot.git.diffStat;
     }
 
     return {
@@ -5459,6 +5706,7 @@ export class Session {
               routeStore: this.scriptRouteStore,
               runtimeStore: this.scriptRuntimeStore,
               daemonPort: this.getDaemonTcpPort?.() ?? null,
+              gitMetadata: this.resolveWorkspaceScriptGitMetadata(workspace.cwd),
               resolveHealth: this.resolveScriptHealth ?? undefined,
             })
           : [],
@@ -5499,19 +5747,7 @@ export class Session {
     projectRecord?: PersistedProjectRecord | null,
   ): Promise<WorkspaceDescriptorPayload> {
     const base = await this.describeWorkspaceRecord(workspace, projectRecord);
-    let snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
-    if (!snapshot) {
-      try {
-        snapshot = await this.workspaceGitService.getSnapshot(workspace.cwd);
-      } catch (error) {
-        this.sessionLogger.warn(
-          { err: error, cwd: workspace.cwd },
-          "Failed to load git snapshot for workspace",
-        );
-        return base;
-      }
-    }
-
+    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
     if (!snapshot) {
       return base;
     }
@@ -6004,14 +6240,14 @@ export class Session {
   private async createPaseoWorktree(
     input: CreatePaseoWorktreeInput,
     options?: {
-      resolveRepositoryDefaultBranch?: (repoRoot: string) => Promise<string>;
+      resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
     },
   ): Promise<CreatePaseoWorktreeResult> {
     const coreDeps = createWorktreeCoreDeps(this.github);
-    return createPaseoWorktree(input, {
+    const result = await createPaseoWorktree(input, {
       ...coreDeps,
-      ...(options?.resolveRepositoryDefaultBranch
-        ? { resolveRepositoryDefaultBranch: options.resolveRepositoryDefaultBranch }
+      ...(options?.resolveDefaultBranch
+        ? { resolveDefaultBranch: options.resolveDefaultBranch }
         : {}),
       projectRegistry: this.projectRegistry,
       workspaceRegistry: this.workspaceRegistry,
@@ -6021,6 +6257,11 @@ export class Session {
       broadcastWorkspaceUpdate: (workspaceId) =>
         this.emitWorkspaceUpdateForWorkspaceId(workspaceId),
     });
+    await Promise.all([
+      this.notifyGitMutation(input.cwd, "create-worktree"),
+      this.notifyGitMutation(result.worktree.worktreePath, "create-worktree"),
+    ]);
+    return result;
   }
 
   private async archiveWorkspaceRecord(workspaceId: string, archivedAt?: string): Promise<void> {
@@ -6340,8 +6581,25 @@ export class Session {
       routeStore: this.scriptRouteStore,
       runtimeStore: this.scriptRuntimeStore,
       daemonPort: this.getDaemonTcpPort?.() ?? null,
+      gitMetadata: this.resolveWorkspaceScriptGitMetadata(workspaceDirectory),
       resolveHealth: this.resolveScriptHealth ?? undefined,
     });
+  }
+
+  private resolveWorkspaceScriptGitMetadata(
+    workspaceDirectory: string,
+  ): { projectSlug: string; currentBranch: string | null } | undefined {
+    const snapshot = this.workspaceGitService.peekSnapshot(workspaceDirectory);
+    if (!snapshot) {
+      return undefined;
+    }
+    return {
+      projectSlug: deriveProjectSlug(
+        workspaceDirectory,
+        snapshot.git.isGit ? snapshot.git.remoteUrl : null,
+      ),
+      currentBranch: snapshot.git.currentBranch,
+    };
   }
 
   private emitWorkspaceScriptStatusUpdate(workspaceId: string, workspaceDirectory: string): void {
@@ -6354,8 +6612,12 @@ export class Session {
     });
   }
 
+  async resolveAvailableEditorTargets(): Promise<EditorTargetDescriptorPayload[]> {
+    return listAvailableEditorTargets();
+  }
+
   async getAvailableEditorTargets() {
-    return this.filterEditorsForClient(await listAvailableEditorTargets());
+    return this.filterEditorsForClient(await this.getMemoizedAvailableEditorTargets());
   }
 
   async openEditorTarget(options: { editorId: EditorTargetId; path: string }): Promise<void> {
@@ -6374,12 +6636,13 @@ export class Session {
       if (!workspace) {
         throw new Error(`Workspace not found: ${request.workspaceId}`);
       }
+      const gitMetadata = await this.workspaceGitService.getWorkspaceGitMetadata(workspace.cwd);
 
       const serviceResult = await spawnWorkspaceScript({
         repoRoot: workspace.cwd,
         workspaceId: workspace.workspaceId,
-        projectSlug: deriveProjectSlug(workspace.cwd),
-        branchName: readGitCommand(workspace.cwd, "git symbolic-ref --short HEAD"),
+        projectSlug: gitMetadata.projectSlug,
+        branchName: gitMetadata.currentBranch,
         scriptName: request.scriptName,
         daemonPort: this.getDaemonTcpPort?.() ?? null,
         daemonListenHost: this.getDaemonTcpHost?.() ?? null,
@@ -8641,6 +8904,21 @@ export class Session {
       slot,
       unsubscribe: () => {},
       needsSnapshot: true,
+      outputCoalescer: new TerminalOutputCoalescer({
+        timers: { setTimeout, clearTimeout },
+        onFlush: ({ payload }) => {
+          if (this.activeTerminalStreams.get(slot) !== activeStream) {
+            return;
+          }
+          this.emitBinary(
+            encodeTerminalStreamFrame({
+              opcode: TerminalStreamOpcode.Output,
+              slot,
+              payload,
+            }),
+          );
+        },
+      }),
     };
 
     this.activeTerminalStreams.set(slot, activeStream);
@@ -8650,21 +8928,19 @@ export class Session {
       if (this.activeTerminalStreams.get(slot) !== activeStream) {
         return;
       }
-      if (message.type === "snapshot" || message.type === "titleChange") {
+      if (message.type === "snapshot") {
+        activeStream.outputCoalescer.flush();
         activeStream.needsSnapshot = true;
         this.trySendTerminalSnapshot(activeStream);
+        return;
+      }
+      if (message.type === "titleChange") {
         return;
       }
       if (activeStream.needsSnapshot || message.data.length === 0) {
         return;
       }
-      this.emitBinary(
-        encodeTerminalStreamFrame({
-          opcode: TerminalStreamOpcode.Output,
-          slot,
-          payload: new Uint8Array(Buffer.from(message.data, "utf8")),
-        }),
-      );
+      activeStream.outputCoalescer.handle(message.data);
     });
     return slot;
   }
@@ -8683,6 +8959,7 @@ export class Session {
       return;
     }
 
+    activeStream.outputCoalescer.flush();
     activeStream.needsSnapshot = false;
     this.emitBinary(
       encodeTerminalStreamFrame({
@@ -8715,6 +8992,7 @@ export class Session {
       this.terminalIdToSlot.delete(terminalId);
       return false;
     }
+    activeStream.outputCoalescer.flush();
     this.activeTerminalStreams.delete(slot);
     this.terminalIdToSlot.delete(terminalId);
     try {
@@ -8738,4 +9016,49 @@ export class Session {
       this.detachTerminalStream(terminalId, { emitExit: false });
     }
   }
+}
+
+export function normalizeCheckoutPrStatusPayload(
+  status: WorkspaceGitRuntimeSnapshot["github"]["pullRequest"],
+): CheckoutPrStatusPayloadStatus | null {
+  if (!status) {
+    return null;
+  }
+  return {
+    number: status.number,
+    url: status.url,
+    title: status.title,
+    state: status.state,
+    repoOwner: status.repoOwner,
+    repoName: status.repoName,
+    baseRefName: status.baseRefName,
+    headRefName: status.headRefName,
+    isMerged: status.isMerged,
+    isDraft: status.isDraft ?? false,
+    checks: status.checks ?? [],
+    checksStatus: status.checksStatus,
+    reviewDecision: status.reviewDecision,
+  };
+}
+
+function isValidPullRequestTimelineIdentity(options: {
+  prNumber: number;
+  repoOwner: string;
+  repoName: string;
+}): boolean {
+  if (!Number.isInteger(options.prNumber) || options.prNumber <= 0) {
+    return false;
+  }
+  return isValidGitHubRepoSegment(options.repoOwner) && isValidGitHubRepoSegment(options.repoName);
+}
+
+function isValidGitHubRepoSegment(value: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(value);
+}
+
+function toPullRequestTimelinePayloadItem(
+  item: PullRequestTimelineItem,
+): PullRequestTimelinePayloadItem {
+  const { authorUrl: _authorUrl, ...payload } = item;
+  return payload;
 }

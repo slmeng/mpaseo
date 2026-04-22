@@ -36,7 +36,7 @@ export interface CreatePaseoWorktreeResult {
 export type CreatePaseoWorktreeFn = (
   input: CreatePaseoWorktreeInput,
   options?: {
-    resolveRepositoryDefaultBranch?: (repoRoot: string) => Promise<string>;
+    resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
   },
 ) => Promise<CreatePaseoWorktreeResult>;
 
@@ -58,6 +58,7 @@ export async function createPaseoWorktree(
     deps,
   });
 
+  deps.github.invalidate({ cwd: createdWorktree.worktree.worktreePath });
   await deps.primeWorkspaceGitWatchFingerprints(workspace);
   await deps.broadcastWorkspaceUpdate(workspace.workspaceId);
 

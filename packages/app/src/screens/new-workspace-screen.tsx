@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { createNameId } from "mnemonic-id";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, GitBranch, GitPullRequest } from "lucide-react-native";
@@ -12,12 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { SidebarMenuToggle } from "@/components/headers/menu-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
-import {
-  HEADER_INNER_HEIGHT,
-  HEADER_INNER_HEIGHT_MOBILE,
-  HEADER_TOP_PADDING_MOBILE,
-  MAX_CONTENT_WIDTH,
-} from "@/constants/layout";
+import { HEADER_INNER_HEIGHT, MAX_CONTENT_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { useToast } from "@/contexts/toast-context";
 import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
@@ -41,8 +37,6 @@ interface NewWorkspaceScreenProps {
 interface PickerOptionData {
   options: ComboboxOptionType[];
   itemById: Map<string, PickerItem>;
-  firstBranchId: string | null;
-  firstPrId: string | null;
 }
 
 interface PickerSelection {
@@ -109,6 +103,8 @@ export function NewWorkspaceScreen({
   displayName: displayNameProp,
 }: NewWorkspaceScreenProps) {
   const { theme } = useUnistyles();
+  const insets = useSafeAreaInsets();
+  const isCompact = useIsCompactFormFactor();
   const toast = useToast();
   const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
   const setAgents = useSessionStore((state) => state.setAgents);
@@ -119,7 +115,15 @@ export function NewWorkspaceScreen({
   const [pendingAction, setPendingAction] = useState<"chat" | null>(null);
   const [pickerSelection, setPickerSelection] = useState<PickerSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearchQuery, setPickerSearchQuery] = useState("");
+  const [debouncedPickerSearchQuery, setDebouncedPickerSearchQuery] = useState("");
   const pickerAnchorRef = useRef<View>(null);
+
+  useEffect(() => {
+    const trimmed = pickerSearchQuery.trim();
+    const timer = setTimeout(() => setDebouncedPickerSearchQuery(trimmed), 180);
+    return () => clearTimeout(timer);
+  }, [pickerSearchQuery]);
 
   const displayName = displayNameProp?.trim() ?? "";
   const workspace = createdWorkspace;
@@ -156,36 +160,49 @@ export function NewWorkspaceScreen({
       return connectedClient.getCheckoutStatus(sourceDirectory);
     },
     enabled: isConnected && !!client,
+    staleTime: Infinity,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
 
   const currentBranch = checkoutStatusQuery.data?.currentBranch ?? null;
 
   const branchSuggestionsQuery = useQuery({
-    queryKey: ["branch-suggestions", serverId, sourceDirectory],
+    queryKey: ["branch-suggestions", serverId, sourceDirectory, debouncedPickerSearchQuery],
     queryFn: async () => {
       const connectedClient = withConnectedClient();
-      return connectedClient.getBranchSuggestions({ cwd: sourceDirectory, limit: 20 });
+      return connectedClient.getBranchSuggestions({
+        cwd: sourceDirectory,
+        query: debouncedPickerSearchQuery || undefined,
+        limit: 20,
+      });
     },
     enabled: isConnected && !!client,
     staleTime: 15_000,
   });
 
   const githubPrSearchQuery = useQuery({
-    queryKey: ["new-workspace-github-prs", serverId, sourceDirectory],
+    queryKey: ["new-workspace-github-prs", serverId, sourceDirectory, debouncedPickerSearchQuery],
     queryFn: async () => {
       const connectedClient = withConnectedClient();
       return connectedClient.searchGitHub({
         cwd: sourceDirectory,
-        query: "",
+        query: debouncedPickerSearchQuery,
         limit: 20,
         kinds: ["github-pr"],
       });
     },
     enabled: isConnected && !!client,
-    staleTime: 60_000,
+    staleTime: 30_000,
   });
 
-  const branchNames: string[] = branchSuggestionsQuery.data?.branches ?? [];
+  const branchDetails = useMemo(() => {
+    const details = branchSuggestionsQuery.data?.branchDetails;
+    if (details && details.length > 0) return details;
+    const names = branchSuggestionsQuery.data?.branches ?? [];
+    return names.map((name) => ({ name, committerDate: 0 }));
+  }, [branchSuggestionsQuery.data?.branchDetails, branchSuggestionsQuery.data?.branches]);
   const githubFeaturesEnabled = githubPrSearchQuery.data?.githubFeaturesEnabled !== false;
   const prItems: GitHubSearchItem[] = useMemo(() => {
     if (!githubFeaturesEnabled) return [];
@@ -193,37 +210,35 @@ export function NewWorkspaceScreen({
     return items.filter((item): item is GitHubSearchItem => item.kind === "pr");
   }, [githubFeaturesEnabled, githubPrSearchQuery.data?.items]);
 
-  const { options, itemById, firstBranchId, firstPrId }: PickerOptionData = useMemo(() => {
-    const collectedOptions: ComboboxOptionType[] = [];
+  const { options, itemById }: PickerOptionData = useMemo(() => {
     const idMap = new Map<string, PickerItem>();
-    let firstBranch: string | null = null;
-    let firstPr: string | null = null;
 
-    for (const name of branchNames) {
-      const id = branchOptionId(name);
-      collectedOptions.push({ id, label: name });
-      idMap.set(id, { kind: "branch", name });
-      if (firstBranch === null) firstBranch = id;
+    interface TimedOption {
+      option: ComboboxOptionType;
+      timestamp: number;
+    }
+    const timedOptions: TimedOption[] = [];
+
+    for (const branch of branchDetails) {
+      const id = branchOptionId(branch.name);
+      const option = { id, label: branch.name };
+      idMap.set(id, { kind: "branch", name: branch.name });
+      timedOptions.push({ option, timestamp: branch.committerDate });
     }
 
     for (const pr of prItems) {
       if (!pr.headRefName) continue;
       const id = prOptionId(pr.number);
-      collectedOptions.push({ id, label: formatPrLabel(pr) });
-      idMap.set(id, {
-        kind: "github-pr",
-        item: pr,
-      });
-      if (firstPr === null) firstPr = id;
+      const option = { id, label: formatPrLabel(pr) };
+      idMap.set(id, { kind: "github-pr", item: pr });
+      const updatedAtMs = pr.updatedAt ? Date.parse(pr.updatedAt) : 0;
+      const timestamp = Number.isNaN(updatedAtMs) ? 0 : Math.floor(updatedAtMs / 1000);
+      timedOptions.push({ option, timestamp });
     }
 
-    return {
-      options: collectedOptions,
-      itemById: idMap,
-      firstBranchId: firstBranch,
-      firstPrId: firstPr,
-    };
-  }, [branchNames, prItems]);
+    timedOptions.sort((a, b) => b.timestamp - a.timestamp);
+    return { options: timedOptions.map((t) => t.option), itemById: idMap };
+  }, [branchDetails, prItems]);
 
   const triggerLabel = useMemo(() => {
     if (selectedItem) return pickerItemTriggerLabel(selectedItem);
@@ -311,6 +326,9 @@ export function NewWorkspaceScreen({
         if (!composerState) {
           throw new Error("Composer state is required");
         }
+        if (!composerState.selectedProvider) {
+          throw new Error("Select a model");
+        }
 
         const initialPrompt = text.trim();
         const encodedImages = await encodeImages(images);
@@ -383,12 +401,6 @@ export function NewWorkspaceScreen({
       if (!item) return <View key={option.id} />;
 
       const isBranch = item.kind === "branch";
-      const isFirstInSection =
-        (isBranch && option.id === firstBranchId) || (!isBranch && option.id === firstPrId);
-
-      const header = isFirstInSection ? (
-        <Text style={styles.sectionHeader}>{isBranch ? "Branches" : "Pull requests"}</Text>
-      ) : null;
 
       const leadingSlot = (
         <View style={styles.rowIconBox}>
@@ -408,29 +420,19 @@ export function NewWorkspaceScreen({
         !isBranch && item.item.baseRefName ? `into ${item.item.baseRefName}` : undefined;
 
       return (
-        <>
-          {header}
-          <ComboboxItem
-            testID={testID}
-            label={pickerItemLabel(item)}
-            description={description}
-            selected={selected}
-            active={active}
-            disabled={isPending}
-            onPress={onPress}
-            leadingSlot={leadingSlot}
-          />
-        </>
+        <ComboboxItem
+          testID={testID}
+          label={pickerItemLabel(item)}
+          description={description}
+          selected={selected}
+          active={active}
+          disabled={isPending}
+          onPress={onPress}
+          leadingSlot={leadingSlot}
+        />
       );
     },
-    [
-      firstBranchId,
-      firstPrId,
-      isPending,
-      itemById,
-      theme.colors.foregroundMuted,
-      theme.iconSize.sm,
-    ],
+    [isPending, itemById, theme.colors.foregroundMuted, theme.iconSize.sm],
   );
 
   return (
@@ -452,7 +454,13 @@ export function NewWorkspaceScreen({
         leftStyle={styles.headerLeft}
         borderless
       />
-      <View style={styles.content}>
+      <View
+        style={[
+          styles.content,
+          isCompact ? styles.contentCompact : styles.contentCentered,
+          isCompact ? { paddingBottom: insets.bottom } : null,
+        ]}
+      >
         <TitlebarDragRegion />
         <View style={styles.centered}>
           <Composer
@@ -532,10 +540,20 @@ export function NewWorkspaceScreen({
                 searchPlaceholder="Search branches and PRs"
                 title="Start from"
                 open={pickerOpen}
-                onOpenChange={setPickerOpen}
+                onOpenChange={(nextOpen) => {
+                  setPickerOpen(nextOpen);
+                  if (!nextOpen) {
+                    setPickerSearchQuery("");
+                  }
+                }}
+                onSearchQueryChange={setPickerSearchQuery}
                 desktopPlacement="bottom-start"
                 anchorRef={pickerAnchorRef}
-                emptyText="No matching refs."
+                emptyText={
+                  branchSuggestionsQuery.isFetching || githubPrSearchQuery.isFetching
+                    ? "Searching..."
+                    : "No matching refs."
+                }
                 renderOption={renderPickerOption}
               />
             </View>
@@ -556,12 +574,14 @@ const styles = StyleSheet.create((theme) => ({
   content: {
     position: "relative",
     flex: 1,
-    justifyContent: "center",
     alignItems: "center",
-    paddingBottom: {
-      xs: HEADER_INNER_HEIGHT_MOBILE + HEADER_TOP_PADDING_MOBILE + theme.spacing[6],
-      md: HEADER_INNER_HEIGHT + theme.spacing[6],
-    },
+  },
+  contentCentered: {
+    justifyContent: "center",
+    paddingBottom: HEADER_INNER_HEIGHT + theme.spacing[6],
+  },
+  contentCompact: {
+    justifyContent: "flex-end",
   },
   centered: {
     width: "100%",
@@ -643,14 +663,5 @@ const styles = StyleSheet.create((theme) => ({
     height: theme.iconSize.md,
     alignItems: "center",
     justifyContent: "center",
-  },
-  sectionHeader: {
-    paddingHorizontal: theme.spacing[3],
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[1],
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase",
-    letterSpacing: 0,
   },
 }));

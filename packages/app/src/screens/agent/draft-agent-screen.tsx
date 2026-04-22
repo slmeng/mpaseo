@@ -19,10 +19,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { FileDropZone } from "@/components/file-drop-zone";
 import { useQuery } from "@tanstack/react-query";
 import type { CreateAgentInitialValues } from "@/hooks/use-agent-form-state";
-import {
-  CHECKOUT_STATUS_STALE_TIME,
-  checkoutStatusQueryKey,
-} from "@/hooks/use-checkout-status-query";
+import { checkoutStatusQueryKey } from "@/hooks/use-checkout-status-query";
 import { useAllAgentsList } from "@/hooks/use-all-agents-list";
 import { useHosts } from "@/runtime/host-runtime";
 import { buildBranchComboOptions, normalizeBranchOptionName } from "@/utils/branch-suggestions";
@@ -39,7 +36,8 @@ import {
   useHostRuntimeIsConnected,
 } from "@/runtime/host-runtime";
 import { ExplorerSidebarAnimationProvider } from "@/contexts/explorer-sidebar-animation-context";
-import { usePanelStore, type ExplorerCheckoutContext } from "@/stores/panel-store";
+import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
+import { type ExplorerCheckoutContext } from "@/stores/explorer-checkout-context";
 import { MAX_CONTENT_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import type { Agent } from "@/contexts/session-context";
@@ -54,6 +52,8 @@ import { resolveWorkspaceIdByExecutionDirectory } from "@/utils/workspace-execut
 import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
+import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
 import { useDraftAgentCreateFlow } from "@/hooks/use-draft-agent-create-flow";
@@ -238,16 +238,22 @@ function DraftAgentScreenContent({
     statusControls,
   } = composerState;
   const isMobile = useIsCompactFormFactor();
-  const mobileView = usePanelStore((state) => state.mobileView);
-  const desktopFileExplorerOpen = usePanelStore((state) => state.desktop.fileExplorerOpen);
-  const toggleFileExplorer = usePanelStore((state) => state.toggleFileExplorer);
-  const openFileExplorer = usePanelStore((state) => state.openFileExplorer);
-  const closeFileExplorer = usePanelStore((state) => state.closeFileExplorer);
-  const setActiveExplorerCheckout = usePanelStore((state) => state.setActiveExplorerCheckout);
+  const isExplorerOpen = usePanelStore((state) =>
+    selectIsFileExplorerOpen(state, { isCompact: isMobile }),
+  );
+  const canOpenExplorerFromAgentView = usePanelStore(
+    (state) =>
+      state.mobileView === "agent" && !selectIsFileExplorerOpen(state, { isCompact: true }),
+  );
+  const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
+  const closeDesktopFileExplorer = usePanelStore((state) => state.closeDesktopFileExplorer);
+  const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
+  const toggleFileExplorerForCheckout = usePanelStore(
+    (state) => state.toggleFileExplorerForCheckout,
+  );
   const activateExplorerTabForCheckout = usePanelStore(
     (state) => state.activateExplorerTabForCheckout,
   );
-  const isExplorerOpen = isMobile ? mobileView === "file-explorer" : desktopFileExplorerOpen;
 
   const [worktreeMode, setWorktreeMode] = useState<"none" | "create" | "attach">(
     initialWorktreeMode,
@@ -341,8 +347,10 @@ function DraftAgentScreenContent({
     },
     enabled: Boolean(trimmedWorkingDir) && canQuerySelectedHost,
     retry: false,
-    staleTime: CHECKOUT_STATUS_STALE_TIME,
-    refetchOnMount: "always",
+    staleTime: Infinity,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
 
   const checkout = checkoutStatusQuery.data ?? null;
@@ -398,8 +406,10 @@ function DraftAgentScreenContent({
     enabled:
       isGitDirectory && Boolean(worktreeListRoot) && canQuerySelectedHost && !isNonGitDirectory,
     retry: false,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: Infinity,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
   const worktreeOptions = useMemo(() => {
     const options = (worktreeListQuery.data ?? []).map((worktree) => ({
@@ -644,22 +654,41 @@ function DraftAgentScreenContent({
     if (!draftExplorerCheckout) {
       return;
     }
-    activateExplorerTabForCheckout(draftExplorerCheckout);
-    openFileExplorer();
-  }, [activateExplorerTabForCheckout, draftExplorerCheckout, openFileExplorer]);
+    openFileExplorerForCheckout({
+      isCompact: isMobile,
+      checkout: draftExplorerCheckout,
+    });
+  }, [draftExplorerCheckout, isMobile, openFileExplorerForCheckout]);
   const handleToggleExplorer = useCallback(() => {
     if (!canOpenExplorer) {
       return;
     }
-    if (isExplorerOpen) {
-      toggleFileExplorer();
-      return;
-    }
-    openExplorerForDraftCheckout();
-  }, [canOpenExplorer, isExplorerOpen, openExplorerForDraftCheckout, toggleFileExplorer]);
+    toggleFileExplorerForCheckout({
+      isCompact: isMobile,
+      checkout: draftExplorerCheckout,
+    });
+  }, [canOpenExplorer, draftExplorerCheckout, isMobile, toggleFileExplorerForCheckout]);
   const explorerOpenGesture = useExplorerOpenGesture({
-    enabled: isMobile && mobileView === "agent" && canOpenExplorer,
+    enabled: isMobile && canOpenExplorerFromAgentView && canOpenExplorer,
     onOpen: openExplorerForDraftCheckout,
+  });
+  const handleDraftSidebarAction = useCallback(
+    (action: KeyboardActionDefinition): boolean => {
+      if (action.id !== "sidebar.toggle.right") {
+        return false;
+      }
+      handleToggleExplorer();
+      return true;
+    },
+    [handleToggleExplorer],
+  );
+  useKeyboardActionHandler({
+    handlerId: `draft-agent-sidebar-actions:${draftIdRef.current}`,
+    actions: ["sidebar.toggle.right"] as const,
+    enabled: Boolean(isFocused && canOpenExplorer),
+    priority: 100,
+    isActive: () => true,
+    handle: handleDraftSidebarAction,
   });
   const hasWorkingDirectorySearch = debouncedWorkingDirSearchQuery.length > 0;
   const workingDirSearchError =
@@ -777,6 +806,9 @@ function DraftAgentScreenContent({
       if (providerDefinitions.length === 0) {
         return "No available providers on the selected host";
       }
+      if (!composerState.selectedProvider) {
+        return "Select a model";
+      }
       if (gitBlockingError) {
         return gitBlockingError;
       }
@@ -817,6 +849,9 @@ function DraftAgentScreenContent({
         (isAttachWorktree && selectedWorktreePath ? selectedWorktreePath : workingDir).trim() ||
         ".";
       const provider = composerState.selectedProvider;
+      if (!provider) {
+        throw new Error("Select a model");
+      }
       const model = effectiveModelId || null;
       const thinkingOptionId = effectiveThinkingOptionId || null;
       const modeId =
@@ -860,8 +895,12 @@ function DraftAgentScreenContent({
         composerState.modeOptions.length > 0 && composerState.selectedMode !== ""
           ? composerState.selectedMode
           : undefined;
+      const provider = composerState.selectedProvider;
+      if (!provider) {
+        throw new Error("Select a model");
+      }
       const config: AgentSessionConfig = {
-        provider: composerState.selectedProvider,
+        provider,
         cwd: resolvedWorkingDir,
         ...(modeId ? { modeId } : {}),
         ...(effectiveModelId ? { model: effectiveModelId } : {}),
@@ -940,12 +979,6 @@ function DraftAgentScreenContent({
     },
   });
   useEffect(() => {
-    if (!isFocused) {
-      return;
-    }
-    setActiveExplorerCheckout(draftExplorerCheckout);
-  }, [draftExplorerCheckout, isFocused, setActiveExplorerCheckout]);
-  useEffect(() => {
     if (!isFocused || !draftExplorerCheckout) {
       return;
     }
@@ -955,14 +988,19 @@ function DraftAgentScreenContent({
     if (!isFocused || canOpenExplorer || !isExplorerOpen) {
       return;
     }
-    closeFileExplorer();
-  }, [canOpenExplorer, closeFileExplorer, isExplorerOpen, isFocused]);
-  useEffect(() => {
-    return () => {
-      setActiveExplorerCheckout(null);
-    };
-  }, [setActiveExplorerCheckout]);
-
+    if (isMobile) {
+      showMobileAgent();
+      return;
+    }
+    closeDesktopFileExplorer();
+  }, [
+    canOpenExplorer,
+    closeDesktopFileExplorer,
+    isExplorerOpen,
+    isFocused,
+    isMobile,
+    showMobileAgent,
+  ]);
   if (daemons.length === 0) {
     return (
       <WelcomeScreen
@@ -1193,7 +1231,7 @@ function DraftAgentScreenContent({
               </ScrollView>
             )}
           </Animated.View>
-          <View style={styles.inputAreaWrapper}>
+          <View style={[styles.inputAreaWrapper, { paddingBottom: insets.bottom }]}>
             <Composer
               agentId={draftAgentIdRef.current}
               serverId={selectedServerId ?? ""}

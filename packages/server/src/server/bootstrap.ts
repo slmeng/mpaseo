@@ -180,6 +180,7 @@ export type PaseoDaemonConfig = {
   mcpInjectIntoAgents?: boolean;
   staticDir: string;
   mcpDebug: boolean;
+  isDev?: boolean;
   agentClients: Partial<Record<AgentProvider, AgentClient>>;
   agentStoragePath: string;
   relayEnabled?: boolean;
@@ -410,11 +411,22 @@ export async function createPaseoDaemon(
       paseoHome: config.paseoHome,
       logger,
     });
+    const terminalManager = createTerminalManager();
+    const github = createGitHubService();
+    const workspaceGitService = new WorkspaceGitServiceImpl({
+      logger,
+      paseoHome: config.paseoHome,
+      deps: {
+        github,
+      },
+    });
     const agentManager = new AgentManager({
       clients: {
         ...createAllClients(logger, {
           runtimeSettings: config.agentProviderSettings,
           providerOverrides: config.providerOverrides,
+          workspaceGitService,
+          isDev: config.isDev === true,
         }),
         ...config.agentClients,
       },
@@ -424,16 +436,8 @@ export async function createPaseoDaemon(
     const providerRegistry = buildProviderRegistry(logger, {
       runtimeSettings: config.agentProviderSettings,
       providerOverrides: config.providerOverrides,
-    });
-
-    const terminalManager = createTerminalManager();
-    const github = createGitHubService();
-    const workspaceGitService = new WorkspaceGitServiceImpl({
-      logger,
-      paseoHome: config.paseoHome,
-      deps: {
-        github,
-      },
+      workspaceGitService,
+      isDev: config.isDev === true,
     });
 
     const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -500,13 +504,14 @@ export async function createPaseoDaemon(
           scheduleService,
           providerRegistry,
           github,
+          workspaceGitService,
           createPaseoWorktree: (input, serviceOptions) => {
             const coreDeps = createWorktreeCoreDeps(github);
             return createPaseoWorktree(input, {
               ...coreDeps,
-              ...(serviceOptions?.resolveRepositoryDefaultBranch
+              ...(serviceOptions?.resolveDefaultBranch
                 ? {
-                    resolveRepositoryDefaultBranch: serviceOptions.resolveRepositoryDefaultBranch,
+                    resolveDefaultBranch: serviceOptions.resolveDefaultBranch,
                   }
                 : {}),
               projectRegistry,
@@ -705,6 +710,7 @@ export async function createPaseoDaemon(
               },
               config.agentProviderSettings,
               config.providerOverrides,
+              config.isDev === true,
               daemonVersion,
               (intent) => {
                 try {

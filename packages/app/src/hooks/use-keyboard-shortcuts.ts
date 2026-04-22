@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "expo-router";
 import { getIsElectronRuntime } from "@/constants/layout";
-import { useHosts } from "@/runtime/host-runtime";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { setCommandCenterFocusRestoreElement } from "@/utils/command-center-focus-restore";
 import {
   buildSettingsRoute,
   parseHostAgentRouteFromPathname,
-  parseServerIdFromPathname,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
 import { navigateToWorkspace } from "@/hooks/use-workspace-navigation";
@@ -27,12 +25,14 @@ import { useOpenProjectPicker } from "@/hooks/use-open-project-picker";
 import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
 import { isNative } from "@/constants/platform";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
+import { getRelativeSidebarShortcutTarget } from "@/utils/sidebar-shortcuts";
+import { useActiveServerId } from "@/hooks/use-active-server-id";
+import { getNavigationActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 
 export function useKeyboardShortcuts({
   enabled,
   isMobile,
   toggleAgentList,
-  toggleFileExplorer,
   toggleBothSidebars,
   toggleFocusMode,
   cycleTheme,
@@ -40,14 +40,12 @@ export function useKeyboardShortcuts({
   enabled: boolean;
   isMobile: boolean;
   toggleAgentList: () => void;
-  toggleFileExplorer?: () => void;
   toggleBothSidebars?: () => void;
   toggleFocusMode?: () => void;
   cycleTheme?: () => void;
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const hosts = useHosts();
   const resetModifiers = useKeyboardShortcutsStore((s) => s.resetModifiers);
   const { overrides } = useKeyboardShortcutOverrides();
   const bindings = useMemo(() => buildEffectiveBindings(overrides), [overrides]);
@@ -56,11 +54,7 @@ export function useKeyboardShortcuts({
     step: 0,
     timeoutId: null,
   });
-  const activeServerIdFromPath = parseServerIdFromPathname(pathname);
-  const activeServerId =
-    hosts.find((host) => host.serverId === activeServerIdFromPath)?.serverId ??
-    hosts[0]?.serverId ??
-    null;
+  const activeServerId = useActiveServerId();
   const openProjectPickerAction = useOpenProjectPicker(activeServerId);
 
   useEffect(() => {
@@ -84,38 +78,32 @@ export function useKeyboardShortcuts({
         return false;
       }
 
-      navigateToWorkspace(target.serverId, target.workspaceId);
+      navigateToWorkspace(target.serverId, target.workspaceId, { currentPathname: pathname });
       return true;
     };
     const navigateRelativeWorkspace = (delta: 1 | -1): boolean => {
       const state = useKeyboardShortcutsStore.getState();
-      const targets = state.visibleWorkspaceTargets;
+      const targets = state.sidebarShortcutWorkspaceTargets;
       if (targets.length === 0) {
         return false;
       }
 
-      const workspaceRoute = parseHostWorkspaceRouteFromPathname(pathname);
-      if (!workspaceRoute) {
-        const fallback = targets[delta > 0 ? 0 : targets.length - 1] ?? null;
-        if (!fallback) {
-          return false;
-        }
-        navigateToWorkspace(fallback.serverId, fallback.workspaceId);
-        return true;
-      }
-
-      const currentIndex = targets.findIndex(
-        (target) =>
-          target.serverId === workspaceRoute.serverId &&
-          target.workspaceId === workspaceRoute.workspaceId,
-      );
-      const fromIndex = currentIndex >= 0 ? currentIndex : delta > 0 ? -1 : 0;
-      const nextIndex = (fromIndex + delta + targets.length) % targets.length;
-      const target = targets[nextIndex] ?? null;
+      const workspaceRoute =
+        getNavigationActiveWorkspaceSelection() ?? parseHostWorkspaceRouteFromPathname(pathname);
+      const target = getRelativeSidebarShortcutTarget({
+        targets,
+        currentTarget: workspaceRoute
+          ? {
+              serverId: workspaceRoute.serverId,
+              workspaceId: workspaceRoute.workspaceId,
+            }
+          : null,
+        delta,
+      });
       if (!target) {
         return false;
       }
-      navigateToWorkspace(target.serverId, target.workspaceId);
+      navigateToWorkspace(target.serverId, target.workspaceId, { currentPathname: pathname });
       return true;
     };
 
@@ -257,10 +245,10 @@ export function useKeyboardShortcuts({
           }
           return true;
         case "sidebar.toggle.right":
-          if (toggleFileExplorer) {
-            toggleFileExplorer();
-          }
-          return true;
+          return keyboardActionDispatcher.dispatch({
+            id: "sidebar.toggle.right",
+            scope: "sidebar",
+          });
         case "view.toggle.focus":
           if (toggleFocusMode) {
             toggleFocusMode();
@@ -425,7 +413,6 @@ export function useKeyboardShortcuts({
     pathname,
     resetModifiers,
     toggleAgentList,
-    toggleFileExplorer,
     toggleFocusMode,
   ]);
 }

@@ -397,7 +397,7 @@ const ToolCallBasePayloadSchema = z
     callId: z.string(),
     name: z.string(),
     detail: ToolCallDetailPayloadSchema,
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
@@ -534,7 +534,7 @@ const AgentPersistenceHandleSchema: z.ZodType<AgentPersistenceHandle | null> = z
     provider: AgentProviderSchema,
     sessionId: z.string(),
     nativeHandle: z.string().optional(),
-    metadata: z.record(z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .nullable();
 
@@ -544,7 +544,7 @@ const AgentRuntimeInfoSchema: z.ZodType<AgentRuntimeInfo> = z.object({
   model: z.string().nullable().optional(),
   thinkingOptionId: z.string().nullable().optional(),
   modeId: z.string().nullable().optional(),
-  extra: z.record(z.unknown()).optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const AgentSnapshotPayloadSchema = z.object({
@@ -568,7 +568,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   lastUsage: AgentUsageSchema.optional(),
   lastError: z.string().optional(),
   title: z.string().nullable(),
-  labels: z.record(z.string()).default({}),
+  labels: z.record(z.string(), z.string()).default({}),
   requiresAttention: z.boolean().optional(),
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
   attentionTimestamp: z.string().nullable().optional(),
@@ -576,6 +576,28 @@ export const AgentSnapshotPayloadSchema = z.object({
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
+
+export const AgentListItemPayloadSchema = z.object({
+  id: z.string(),
+  shortId: z.string(),
+  title: z.string().nullable(),
+  provider: AgentProviderSchema,
+  model: z.string().nullable(),
+  thinkingOptionId: z.string().nullable().optional(),
+  effectiveThinkingOptionId: z.string().nullable().optional(),
+  status: AgentStatusSchema,
+  cwd: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lastUserMessageAt: z.string().nullable(),
+  archivedAt: z.string().nullable().optional(),
+  requiresAttention: z.boolean().optional(),
+  attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
+  attentionTimestamp: z.string().nullable().optional(),
+  labels: z.record(z.string(), z.string()).default({}),
+});
+
+export type AgentListItemPayload = z.infer<typeof AgentListItemPayloadSchema>;
 
 export type AgentStreamEventPayload = z.infer<typeof AgentStreamEventPayloadSchema>;
 
@@ -1133,6 +1155,15 @@ export const CheckoutPrStatusRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const PullRequestTimelineRequestSchema = z.object({
+  type: z.literal("pull_request_timeline_request"),
+  cwd: z.string(),
+  prNumber: z.number(),
+  repoOwner: z.string(),
+  repoName: z.string(),
+  requestId: z.string(),
+});
+
 export const ValidateBranchRequestSchema = z.object({
   type: z.literal("validate_branch_request"),
   cwd: z.string(),
@@ -1189,6 +1220,7 @@ export const GitHubSearchItemSchema = z.object({
   labels: z.array(z.string()),
   baseRefName: z.string().nullable().optional(),
   headRefName: z.string().nullable().optional(),
+  updatedAt: z.string().optional(),
 });
 
 export const GitHubSearchKindSchema = z.enum(["github-issue", "github-pr"]);
@@ -1553,6 +1585,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutPushRequestSchema,
   CheckoutPrCreateRequestSchema,
   CheckoutPrStatusRequestSchema,
+  PullRequestTimelineRequestSchema,
   CheckoutSwitchBranchRequestSchema,
   StashSaveRequestSchema,
   StashPopRequestSchema,
@@ -1958,6 +1991,7 @@ export const WorkspaceScriptPayloadSchema = z.object({
   lifecycle: WorkspaceScriptLifecycleSchema,
   health: WorkspaceScriptHealthSchema.nullable(),
   exitCode: z.number().nullable().optional().default(null),
+  terminalId: z.string().nullable().optional().default(null),
 });
 
 const WorkspaceGitRuntimePayloadSchema = z
@@ -2424,6 +2458,56 @@ export const CheckoutStatusResponseSchema = z.object({
   ]),
 });
 
+export const CheckoutPrStatusSchema = z.object({
+  number: z.number().optional(),
+  url: z.string(),
+  title: z.string(),
+  state: z.string(),
+  baseRefName: z.string(),
+  headRefName: z.string(),
+  isMerged: z.boolean(),
+  isDraft: z.boolean().optional().default(false),
+  checks: z
+    .array(
+      z.object({
+        name: z.string(),
+        status: z.string(),
+        url: z.string().nullable(),
+        workflow: z.string().optional(),
+        duration: z.string().optional(),
+      }),
+    )
+    .optional()
+    .default([]),
+  checksStatus: z.string().optional(),
+  reviewDecision: z.string().nullable().optional(),
+  repoOwner: z.string().optional(),
+  repoName: z.string().optional(),
+});
+
+const CheckoutPrStatusPayloadSchema = z.object({
+  cwd: z.string(),
+  status: CheckoutPrStatusSchema.nullable(),
+  githubFeaturesEnabled: z.boolean(),
+  error: CheckoutErrorSchema.nullable(),
+  requestId: z.string(),
+});
+
+const CheckoutStatusUpdateMetadataSchema = z.object({
+  prStatus: CheckoutPrStatusPayloadSchema.optional(),
+});
+
+export const CheckoutStatusUpdateSchema = z.object({
+  type: z.literal("checkout_status_update"),
+  payload: z
+    .union([
+      CheckoutStatusNotGitSchema,
+      CheckoutStatusGitNonPaseoSchema,
+      CheckoutStatusGitPaseoSchema,
+    ])
+    .and(CheckoutStatusUpdateMetadataSchema),
+});
+
 const CheckoutDiffSubscriptionPayloadSchema = z.object({
   subscriptionId: z.string(),
   cwd: z.string(),
@@ -2504,35 +2588,90 @@ export const CheckoutPrCreateResponseSchema = z.object({
   }),
 });
 
-const CheckoutPrStatusSchema = z.object({
-  url: z.string(),
-  title: z.string(),
-  state: z.string(),
-  baseRefName: z.string(),
-  headRefName: z.string(),
-  isMerged: z.boolean(),
-  checks: z
-    .array(
-      z.object({
-        name: z.string(),
-        status: z.string(),
-        url: z.string().nullable(),
-      }),
-    )
-    .optional(),
-  checksStatus: z.string().optional(),
-  reviewDecision: z.string().nullable().optional(),
-});
-
 export const CheckoutPrStatusResponseSchema = z.object({
   type: z.literal("checkout_pr_status_response"),
-  payload: z.object({
-    cwd: z.string(),
-    status: CheckoutPrStatusSchema.nullable(),
-    githubFeaturesEnabled: z.boolean(),
-    error: CheckoutErrorSchema.nullable(),
-    requestId: z.string(),
+  payload: CheckoutPrStatusPayloadSchema,
+});
+
+const PullRequestTimelineKnownErrorSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("not_found"),
+    message: z.string().optional().default(""),
   }),
+  z.object({
+    kind: z.literal("forbidden"),
+    message: z.string().optional().default(""),
+  }),
+  z.object({
+    kind: z.literal("unknown"),
+    message: z.string().optional().default(""),
+  }),
+]);
+
+const PullRequestTimelineErrorSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { kind: "unknown", message: "" };
+  }
+  const error = value as Record<string, unknown>;
+  if (error.kind === "not_found" || error.kind === "forbidden" || error.kind === "unknown") {
+    return error;
+  }
+  return { ...error, kind: "unknown" };
+}, PullRequestTimelineKnownErrorSchema);
+
+const PullRequestTimelineReviewItemSchema = z.object({
+  id: z.string().optional().default(""),
+  kind: z.literal("review"),
+  author: z.string().optional().default("unknown"),
+  body: z.string().optional().default(""),
+  createdAt: z.number().optional().default(0),
+  url: z.string().optional().default(""),
+  reviewState: z
+    .enum(["approved", "changes_requested", "commented"])
+    .optional()
+    .default("commented"),
+});
+
+const PullRequestTimelineCommentItemSchema = z.object({
+  id: z.string().optional().default(""),
+  kind: z.literal("comment"),
+  author: z.string().optional().default("unknown"),
+  body: z.string().optional().default(""),
+  createdAt: z.number().optional().default(0),
+  url: z.string().optional().default(""),
+});
+
+export const PullRequestTimelineItemSchema = z.preprocess(
+  (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return value;
+    }
+    const item = value as Record<string, unknown>;
+    if (item.kind === "review" || item.kind === "comment") {
+      return item;
+    }
+    return { ...item, kind: "comment" };
+  },
+  z.discriminatedUnion("kind", [
+    PullRequestTimelineReviewItemSchema,
+    PullRequestTimelineCommentItemSchema,
+  ]),
+);
+
+export const PullRequestTimelineResponseSchema = z.object({
+  type: z.literal("pull_request_timeline_response"),
+  payload: z
+    .object({
+      cwd: z.string().optional().default(""),
+      prNumber: z.number().nullable().optional().default(null),
+      items: z.array(PullRequestTimelineItemSchema).optional().default([]),
+      truncated: z.boolean().optional().default(false),
+      error: PullRequestTimelineErrorSchema.nullable().optional().default(null),
+      requestId: z.string().optional().default(""),
+      githubFeaturesEnabled: z.boolean().optional().default(true),
+    })
+    .optional()
+    .default({}),
 });
 
 export const CheckoutSwitchBranchResponseSchema = z.object({
@@ -2541,6 +2680,7 @@ export const CheckoutSwitchBranchResponseSchema = z.object({
     cwd: z.string(),
     success: z.boolean(),
     branch: z.string(),
+    source: z.enum(["local", "remote"]).optional(),
     error: CheckoutErrorSchema.nullable(),
     requestId: z.string(),
   }),
@@ -2598,6 +2738,16 @@ export const BranchSuggestionsResponseSchema = z.object({
   type: z.literal("branch_suggestions_response"),
   payload: z.object({
     branches: z.array(z.string()),
+    branchDetails: z
+      .array(
+        z.object({
+          name: z.string(),
+          committerDate: z.number(),
+          hasLocal: z.boolean().optional(),
+          hasRemote: z.boolean().optional(),
+        }),
+      )
+      .optional(),
     error: z.string().nullable(),
     requestId: z.string(),
   }),
@@ -2982,6 +3132,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentArchivedMessageSchema,
   CloseItemsResponseSchema,
   CheckoutStatusResponseSchema,
+  CheckoutStatusUpdateSchema,
   SubscribeCheckoutDiffResponseSchema,
   CheckoutDiffUpdateSchema,
   CheckoutCommitResponseSchema,
@@ -2991,6 +3142,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutPushResponseSchema,
   CheckoutPrCreateResponseSchema,
   CheckoutPrStatusResponseSchema,
+  PullRequestTimelineResponseSchema,
   CheckoutSwitchBranchResponseSchema,
   StashSaveResponseSchema,
   StashPopResponseSchema,
@@ -3207,6 +3359,7 @@ export type SetAgentFeatureRequestMessage = z.infer<typeof SetAgentFeatureReques
 export type AgentPermissionResponseMessage = z.infer<typeof AgentPermissionResponseMessageSchema>;
 export type CheckoutStatusRequest = z.infer<typeof CheckoutStatusRequestSchema>;
 export type CheckoutStatusResponse = z.infer<typeof CheckoutStatusResponseSchema>;
+export type CheckoutStatusUpdate = z.infer<typeof CheckoutStatusUpdateSchema>;
 export type SubscribeCheckoutDiffRequest = z.infer<typeof SubscribeCheckoutDiffRequestSchema>;
 export type UnsubscribeCheckoutDiffRequest = z.infer<typeof UnsubscribeCheckoutDiffRequestSchema>;
 export type SubscribeCheckoutDiffResponse = z.infer<typeof SubscribeCheckoutDiffResponseSchema>;
@@ -3225,6 +3378,9 @@ export type CheckoutPrCreateRequest = z.infer<typeof CheckoutPrCreateRequestSche
 export type CheckoutPrCreateResponse = z.infer<typeof CheckoutPrCreateResponseSchema>;
 export type CheckoutPrStatusRequest = z.infer<typeof CheckoutPrStatusRequestSchema>;
 export type CheckoutPrStatusResponse = z.infer<typeof CheckoutPrStatusResponseSchema>;
+export type PullRequestTimelineRequest = z.infer<typeof PullRequestTimelineRequestSchema>;
+export type PullRequestTimelineItem = z.infer<typeof PullRequestTimelineItemSchema>;
+export type PullRequestTimelineResponse = z.infer<typeof PullRequestTimelineResponseSchema>;
 export type CheckoutSwitchBranchRequest = z.infer<typeof CheckoutSwitchBranchRequestSchema>;
 export type CheckoutSwitchBranchResponse = z.infer<typeof CheckoutSwitchBranchResponseSchema>;
 export type StashSaveRequest = z.infer<typeof StashSaveRequestSchema>;

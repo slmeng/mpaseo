@@ -132,7 +132,8 @@ function WorkspaceHoverCardDesktop({
 
   const handleTriggerLeave = useCallback(() => {
     triggerHoveredRef.current = false;
-  }, []);
+    scheduleClose();
+  }, [scheduleClose]);
 
   // While open, the safe zone covers trigger + content + the bridge between
   // them. Close only fires when the pointer leaves the safe zone; re-entering
@@ -155,11 +156,16 @@ function WorkspaceHoverCardDesktop({
 
   // When content becomes available while trigger is already hovered, open the card.
   useEffect(() => {
-    if (!hasContent || isDragging) return;
+    if (!hasContent) {
+      clearGraceTimer();
+      setOpen(false);
+      return;
+    }
+    if (isDragging) return;
     if (triggerHoveredRef.current) {
       setOpen(true);
     }
-  }, [hasContent, isDragging]);
+  }, [clearGraceTimer, hasContent, isDragging]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -306,14 +312,24 @@ function WorkspaceHoverCardContent({
                     badgeLabel = `${checks.length} passed`;
                   }
 
+                  const iconColor = hovered
+                    ? theme.colors.foreground
+                    : theme.colors.foregroundMuted;
                   return (
                     <>
                       {hovered ? (
-                        <ExternalLink size={12} color={theme.colors.foregroundMuted} />
+                        <ExternalLink size={12} color={iconColor} />
                       ) : (
-                        <GitHubIcon size={12} color={theme.colors.foregroundMuted} />
+                        <GitHubIcon size={12} color={iconColor} />
                       )}
-                      <Text style={styles.checksSummaryLabel}>Checks</Text>
+                      <Text
+                        style={[
+                          styles.checksSummaryLabel,
+                          hovered && styles.checksSummaryLabelHovered,
+                        ]}
+                      >
+                        Checks
+                      </Text>
                       <View style={styles.checksSummaryCounts}>
                         <View style={[styles.checksDot, { backgroundColor: badgeColor }]} />
                         <Text style={[styles.checksStatusText, { color: badgeColor }]}>
@@ -394,6 +410,9 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.normal,
     color: theme.colors.foregroundMuted,
+  },
+  checksSummaryLabelHovered: {
+    color: theme.colors.foreground,
   },
   checksSummaryCounts: {
     flexDirection: "row",

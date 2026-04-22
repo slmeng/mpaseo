@@ -32,7 +32,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Shortcut } from "@/components/ui/shortcut";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { router, usePathname } from "expo-router";
-import { usePanelStore, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "@/stores/panel-store";
+import {
+  usePanelStore,
+  selectIsAgentListOpen,
+  MIN_SIDEBAR_WIDTH,
+  MAX_SIDEBAR_WIDTH,
+} from "@/stores/panel-store";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
@@ -52,10 +57,10 @@ import {
   buildHostSessionsRoute,
   buildSettingsRoute,
   mapPathnameToServer,
-  parseServerIdFromPathname,
 } from "@/utils/host-routes";
 import { useOpenProjectPicker } from "@/hooks/use-open-project-picker";
 import { isWeb } from "@/constants/platform";
+import { resolveActiveHost } from "@/utils/active-host";
 
 const MIN_CHAT_WIDTH = 400;
 
@@ -116,24 +121,16 @@ export const LeftSidebar = memo(function LeftSidebar({
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const isCompactLayout = useIsCompactFormFactor();
-  const mobileView = usePanelStore((state) => state.mobileView);
-  const desktopAgentListOpen = usePanelStore((state) => state.desktop.agentListOpen);
-  const closeToAgent = usePanelStore((state) => state.closeToAgent);
+  const isOpen = usePanelStore((state) =>
+    selectIsAgentListOpen(state, { isCompact: isCompactLayout }),
+  );
+  const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
   const pathname = usePathname();
   const daemons = useHosts();
-  const activeServerIdFromPath = useMemo(() => parseServerIdFromPathname(pathname), [pathname]);
-  const activeDaemon = useMemo(() => {
-    if (daemons.length === 0) {
-      return null;
-    }
-    if (activeServerIdFromPath) {
-      const routeMatch = daemons.find((entry) => entry.serverId === activeServerIdFromPath);
-      if (routeMatch) {
-        return routeMatch;
-      }
-    }
-    return daemons[0] ?? null;
-  }, [activeServerIdFromPath, daemons]);
+  const activeDaemon = useMemo(
+    () => resolveActiveHost({ hosts: daemons, pathname }),
+    [daemons, pathname],
+  );
   const activeServerId = activeDaemon?.serverId ?? null;
   const activeHostLabel = useMemo(() => {
     if (!activeDaemon) return "No host";
@@ -183,14 +180,12 @@ export const LeftSidebar = memo(function LeftSidebar({
   const hostTriggerRef = useRef<View | null>(null);
   const [isHostPickerOpen, setIsHostPickerOpen] = useState(false);
 
-  const isOpen = isCompactLayout ? mobileView === "agent-list" : desktopAgentListOpen;
-
   const { projects, isInitialLoad, isRevalidating, refreshAll } = useSidebarWorkspacesList({
     serverId: activeServerId,
-    enabled: isOpen,
+    enabled: isCompactLayout || isOpen,
   });
   const { collapsedProjectKeys, shortcutIndexByWorkspaceKey, toggleProjectCollapsed } =
-    useSidebarShortcutModel(projects);
+    useSidebarShortcutModel({ projects, isInitialLoad });
 
   const [isManualRefresh, setIsManualRefresh] = useState(false);
 
@@ -208,18 +203,18 @@ export const LeftSidebar = memo(function LeftSidebar({
   const openProjectPicker = useOpenProjectPicker(activeServerId);
 
   const handleOpenProjectMobile = useCallback(() => {
-    closeToAgent();
+    showMobileAgent();
     void openProjectPicker();
-  }, [closeToAgent, openProjectPicker]);
+  }, [showMobileAgent, openProjectPicker]);
 
   const handleOpenProjectDesktop = useCallback(() => {
     void openProjectPicker();
   }, [openProjectPicker]);
 
   const handleSettingsMobile = useCallback(() => {
-    closeToAgent();
+    showMobileAgent();
     router.push(buildSettingsRoute());
-  }, [closeToAgent]);
+  }, [showMobileAgent]);
 
   const handleSettingsDesktop = useCallback(() => {
     router.push(buildSettingsRoute());
@@ -272,7 +267,7 @@ export const LeftSidebar = memo(function LeftSidebar({
         insetsTop={insets.top}
         insetsBottom={insets.bottom}
         isOpen={isOpen}
-        closeToAgent={closeToAgent}
+        closeToAgent={showMobileAgent}
         handleOpenProject={handleOpenProjectMobile}
         handleSettings={handleSettingsMobile}
         handleViewMoreNavigate={handleViewMoreNavigate}

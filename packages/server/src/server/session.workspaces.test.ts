@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { Session } from "./session.js";
-import type { AgentSnapshotPayload } from "../shared/messages.js";
+import type {
+  AgentSnapshotPayload,
+  EditorTargetDescriptorPayload,
+  SessionOutboundMessage,
+} from "../shared/messages.js";
 import type { WorkspaceGitRuntimeSnapshot } from "./workspace-git-service.js";
 import {
   createPersistedProjectRecord,
@@ -112,6 +116,9 @@ function createNoopWorkspaceGitService() {
         refreshedAt: null,
       },
     }),
+    resolveRepoRemoteUrl: async () => null,
+    resolveRepoRoot: async (cwd: string) => cwd,
+    resolveDefaultBranch: async () => "main",
     refresh: async () => {},
     requestWorkingTreeWatch: async (cwd: string) => ({
       repoRoot: cwd,
@@ -139,9 +146,11 @@ function createWorkspaceRuntimeSnapshot(
       remoteUrl: "https://github.com/acme/repo.git",
       isPaseoOwnedWorktree: false,
       isDirty: false,
+      baseRef: "main",
       aheadBehind: { ahead: 0, behind: 0 },
       aheadOfOrigin: 0,
       behindOfOrigin: 0,
+      hasRemote: true,
       diffStat: { additions: 1, deletions: 0 },
     },
     github: {
@@ -183,6 +192,7 @@ function createWorkspaceRuntimeSnapshot(
 function createSessionForWorkspaceTests(
   options: {
     appVersion?: string | null;
+    onMessage?: (message: SessionOutboundMessage) => void;
     workspaceGitService?: ReturnType<typeof createNoopWorkspaceGitService>;
   } = {},
 ): Session {
@@ -198,7 +208,7 @@ function createSessionForWorkspaceTests(
   const session = new Session({
     clientId: "test-client",
     appVersion: options.appVersion ?? null,
-    onMessage: vi.fn(),
+    onMessage: options.onMessage ?? vi.fn(),
     logger: logger as any,
     downloadTokenStore: {} as any,
     pushTokenStore: {} as any,
@@ -1548,6 +1558,61 @@ describe("workspace aggregation", () => {
       { id: "finder", label: "Finder" },
       { id: "unknown-editor", label: "Unknown Editor" },
     ]);
+  });
+
+  test("list_available_editors_request coalesces concurrent discovery", async () => {
+    const emitted: SessionOutboundMessage[] = [];
+    const session = createSessionForWorkspaceTests({
+      appVersion: "0.1.50",
+      onMessage: (message) => emitted.push(message),
+    });
+    let resolveDiscovery: (editors: EditorTargetDescriptorPayload[]) => void = () => {};
+    let discoveryCalls = 0;
+
+    vi.spyOn(session, "resolveAvailableEditorTargets").mockImplementation(async () => {
+      discoveryCalls += 1;
+      return await new Promise<EditorTargetDescriptorPayload[]>((resolve) => {
+        resolveDiscovery = resolve;
+      });
+    });
+
+    const first = session.handleMessage({
+      type: "list_available_editors_request",
+      requestId: "req-editors-1",
+    });
+    const second = session.handleMessage({
+      type: "list_available_editors_request",
+      requestId: "req-editors-2",
+    });
+
+    await Promise.resolve();
+    expect(discoveryCalls).toBe(1);
+
+    resolveDiscovery([{ id: "cursor", label: "Cursor" }]);
+    await Promise.all([first, second]);
+
+    const responses = emitted.filter(
+      (
+        message,
+      ): message is Extract<SessionOutboundMessage, { type: "list_available_editors_response" }> =>
+        message.type === "list_available_editors_response",
+    );
+    expect(responses).toHaveLength(2);
+    expect(responses.map((response) => response.payload.requestId)).toEqual([
+      "req-editors-1",
+      "req-editors-2",
+    ]);
+    expect(responses.map((response) => response.payload.editors)).toEqual([
+      [{ id: "cursor", label: "Cursor" }],
+      [{ id: "cursor", label: "Cursor" }],
+    ]);
+
+    await session.handleMessage({
+      type: "list_available_editors_request",
+      requestId: "req-editors-3",
+    });
+
+    expect(discoveryCalls).toBe(1);
   });
 
   test("list_available_editors_request filters unsupported ids for legacy clients", async () => {

@@ -16,6 +16,7 @@ import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-sto
 import {
   type ServerInfoStatusPayload,
   type SessionOutboundMessage,
+  type WorkspaceSetupSnapshot,
   type WSHelloMessage,
   WSInboundMessageSchema,
   type ServerCapabilityState,
@@ -42,11 +43,7 @@ import type { ScriptRouteStore } from "./script-proxy.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import type { SpeechReadinessSnapshot, SpeechService } from "./speech/speech-runtime.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
-import {
-  computeShouldNotifyClient,
-  computeShouldSendPush,
-  type ClientAttentionState,
-} from "./agent-attention-policy.js";
+import { computeNotificationPlan, type ClientPresenceState } from "./agent-attention-policy.js";
 import {
   buildAgentAttentionNotificationPayload,
   findLatestPermissionRequest,
@@ -321,8 +318,10 @@ export class VoiceAssistantWebSocketServer {
   } | null;
   private readonly voiceSpeakHandlers = new Map<string, VoiceSpeakHandler>();
   private readonly voiceCallerContexts = new Map<string, VoiceCallerContext>();
+  private readonly workspaceSetupSnapshots = new Map<string, WorkspaceSetupSnapshot>();
   private readonly agentProviderRuntimeSettings: AgentProviderRuntimeSettingsMap | undefined;
   private readonly providerOverrides: Record<string, ProviderOverride> | undefined;
+  private readonly isDev: boolean;
   private readonly providerSnapshotManager: ProviderSnapshotManager;
   private readonly onLifecycleIntent: ((intent: SessionLifecycleIntent) => void) | null;
   private readonly onBranchChanged:
@@ -378,6 +377,7 @@ export class VoiceAssistantWebSocketServer {
     },
     agentProviderRuntimeSettings?: AgentProviderRuntimeSettingsMap,
     providerOverrides?: Record<string, ProviderOverride>,
+    isDev?: boolean,
     daemonVersion?: string,
     onLifecycleIntent?: (intent: SessionLifecycleIntent) => void,
     projectRegistry?: ProjectRegistry,
@@ -436,11 +436,13 @@ export class VoiceAssistantWebSocketServer {
     this.dictation = dictation ?? null;
     this.agentProviderRuntimeSettings = agentProviderRuntimeSettings;
     this.providerOverrides = providerOverrides;
+    this.isDev = isDev === true;
     const providerSnapshotLogger = this.logger.child({ module: "provider-snapshot-manager" });
     this.providerSnapshotManager = new ProviderSnapshotManager(
       buildProviderRegistry(providerSnapshotLogger, {
         runtimeSettings: this.agentProviderRuntimeSettings,
         providerOverrides: this.providerOverrides,
+        isDev: this.isDev,
       }),
       providerSnapshotLogger,
     );
@@ -766,6 +768,7 @@ export class VoiceAssistantWebSocketServer {
       providerSnapshotManager: this.providerSnapshotManager,
       scriptRouteStore: this.scriptRouteStore ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
+      workspaceSetupSnapshots: this.workspaceSetupSnapshots,
       onBranchChanged: this.onBranchChanged ?? undefined,
       getDaemonTcpPort: this.getDaemonTcpPort ?? undefined,
       getDaemonTcpHost: this.getDaemonTcpHost ?? undefined,
@@ -797,6 +800,7 @@ export class VoiceAssistantWebSocketServer {
           : undefined,
       agentProviderRuntimeSettings: this.agentProviderRuntimeSettings,
       providerOverrides: this.providerOverrides,
+      isDev: this.isDev,
     });
 
     connection = {
@@ -1319,8 +1323,6 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
-  private readonly ACTIVITY_THRESHOLD_MS = 120_000;
-
   private incrementRuntimeCounter(counter: keyof WebSocketRuntimeCounters): void {
     this.runtimeCounters[counter] += 1;
   }
@@ -1520,19 +1522,18 @@ export class VoiceAssistantWebSocketServer {
     this.runtimeWindowStartedAt = now;
   }
 
-  private getClientActivityState(session: Session): ClientAttentionState {
+  private getClientActivityState(session: Session): ClientPresenceState {
     const activity = session.getClientActivity();
     if (!activity) {
-      return { deviceType: null, focusedAgentId: null, isStale: true, appVisible: false };
+      return {
+        focusedAgentId: null,
+        lastActivityAtMs: null,
+      };
     }
-    const now = Date.now();
-    const ageMs = now - activity.lastActivityAt.getTime();
-    const isStale = ageMs >= this.ACTIVITY_THRESHOLD_MS;
+
     return {
-      deviceType: activity.deviceType,
       focusedAgentId: activity.focusedAgentId,
-      isStale,
-      appVisible: activity.appVisible,
+      lastActivityAtMs: activity.lastActivityAt.getTime(),
     };
   }
 
@@ -1543,7 +1544,7 @@ export class VoiceAssistantWebSocketServer {
   }): Promise<void> {
     const clientEntries: Array<{
       ws: WebSocketLike;
-      state: ClientAttentionState;
+      state: ClientPresenceState;
     }> = [];
 
     for (const [ws, connection] of this.sessions) {
@@ -1554,6 +1555,7 @@ export class VoiceAssistantWebSocketServer {
     }
 
     const allStates = clientEntries.map((e) => e.state);
+    const nowMs = Date.now();
     const agent = this.agentManager.getAgent(params.agentId);
     const assistantMessage = await this.agentManager.getLastAssistantMessage(params.agentId);
     const notification = buildAgentAttentionNotificationPayload({
@@ -1564,14 +1566,14 @@ export class VoiceAssistantWebSocketServer {
       permissionRequest: agent ? findLatestPermissionRequest(agent.pendingPermissions) : null,
     });
 
-    // Push is only a fallback when the user is away from desktop/web.
-    // Also suppress push if they're actively using the mobile app.
-    const shouldSendPush = computeShouldSendPush({
+    const plan = computeNotificationPlan({
+      allStates,
+      agentId: params.agentId,
       reason: params.reason,
-      allClientStates: allStates,
+      nowMs,
     });
 
-    if (shouldSendPush) {
+    if (plan.shouldPush) {
       const tokens = this.pushTokenStore.getAllTokens();
       this.logger.info({ tokenCount: tokens.length }, "Sending push notification");
       if (tokens.length > 0) {
@@ -1579,13 +1581,9 @@ export class VoiceAssistantWebSocketServer {
       }
     }
 
-    for (const { ws, state } of clientEntries) {
-      const shouldNotify = computeShouldNotifyClient({
-        clientState: state,
-        allClientStates: allStates,
-        agentId: params.agentId,
-      });
-
+    for (const [clientIndex, { ws }] of clientEntries.entries()) {
+      const shouldNotify = clientIndex === plan.inAppRecipientIndex;
+      const timestamp = new Date().toISOString();
       const message = wrapSessionMessage({
         type: "agent_stream",
         payload: {
@@ -1594,11 +1592,11 @@ export class VoiceAssistantWebSocketServer {
             type: "attention_required",
             provider: params.provider,
             reason: params.reason,
-            timestamp: new Date().toISOString(),
+            timestamp,
             shouldNotify,
             notification,
           },
-          timestamp: new Date().toISOString(),
+          timestamp,
         },
       });
 

@@ -5,7 +5,7 @@ import { PanelLeft } from "lucide-react-native";
 import { ScreenHeader } from "./screen-header";
 import { ScreenTitle } from "./screen-title";
 import { HeaderToggleButton } from "./header-toggle-button";
-import { usePanelStore } from "@/stores/panel-store";
+import { selectIsAgentListOpen, usePanelStore } from "@/stores/panel-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 
@@ -46,18 +46,16 @@ export function SidebarMenuToggle({
 }: SidebarMenuToggleProps = {}) {
   const { theme } = useUnistyles();
   const isMobile = useIsCompactFormFactor();
-  const mobileView = usePanelStore((state) => state.mobileView);
-  const desktopAgentListOpen = usePanelStore((state) => state.desktop.agentListOpen);
-  const toggleAgentList = usePanelStore((state) => state.toggleAgentList);
+  const isOpen = usePanelStore((state) => selectIsAgentListOpen(state, { isCompact: isMobile }));
+  const toggleAgentListForLayout = usePanelStore((state) => state.toggleAgentListForLayout);
   const toggleShortcutKeys = getShortcutOs() === "mac" ? ["mod", "B"] : ["mod", "."];
 
-  const isOpen = isMobile ? mobileView === "agent-list" : desktopAgentListOpen;
   const menuIconColor =
     !isMobile && isOpen ? theme.colors.foreground : theme.colors.foregroundMuted;
 
   return (
     <HeaderToggleButton
-      onPress={toggleAgentList}
+      onPress={() => toggleAgentListForLayout({ isCompact: isMobile })}
       tooltipLabel="Toggle sidebar"
       tooltipKeys={toggleShortcutKeys}
       tooltipSide={tooltipSide}

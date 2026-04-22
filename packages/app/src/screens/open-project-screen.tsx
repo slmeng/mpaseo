@@ -8,6 +8,7 @@ import { MenuHeader } from "@/components/headers/menu-header";
 import { useOpenProjectPicker } from "@/hooks/use-open-project-picker";
 import { usePanelStore } from "@/stores/panel-store";
 import { useSessionStore } from "@/stores/session-store";
+import { useHasWorkspaces } from "@/stores/session-store-hooks";
 import {
   useIsCompactFormFactor,
   HEADER_INNER_HEIGHT,
@@ -19,10 +20,10 @@ import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
 
 export function OpenProjectScreen({ serverId }: { serverId: string }) {
-  const openAgentList = usePanelStore((s) => s.openAgentList);
+  const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
   const openProjectPicker = useOpenProjectPicker(serverId);
   const hasHydrated = useSessionStore((s) => s.sessions[serverId]?.hasHydratedWorkspaces ?? false);
-  const hasProjects = useSessionStore((s) => (s.sessions[serverId]?.workspaces?.size ?? 0) > 0);
+  const hasProjects = useHasWorkspaces(serverId);
   const isLocalDaemon = useIsLocalDaemon(serverId);
   const [isPairDeviceOpen, setIsPairDeviceOpen] = useState(false);
 
@@ -30,9 +31,9 @@ export function OpenProjectScreen({ serverId }: { serverId: string }) {
 
   useEffect(() => {
     if (!isCompactLayout) {
-      openAgentList();
+      openDesktopAgentList();
     }
-  }, [isCompactLayout, openAgentList]);
+  }, [isCompactLayout, openDesktopAgentList]);
 
   return (
     <View style={styles.container}>

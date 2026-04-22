@@ -20,10 +20,12 @@ const {
   deleteAttachmentsMock,
   encodeImagesMock,
   openExternalUrlMock,
+  markScrollInvestigationRenderMock,
   mockSessionState,
   setAgentStreamTailMock,
   setAgentStreamHeadMock,
   setQueuedMessagesMock,
+  agentDirectoryStatusMock,
 } = vi.hoisted(() => {
   const theme = {
     spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24, 8: 32 },
@@ -102,6 +104,17 @@ const {
       string,
       {
         agents: Map<string, { status: string; lastUsage: null }>;
+        serverInfo: {
+          serverId: string;
+          hostname: string | null;
+          version: string | null;
+          capabilities?: {
+            voice?: {
+              dictation: { enabled: boolean; reason: string };
+              voice: { enabled: boolean; reason: string };
+            };
+          };
+        } | null;
         queuedMessages: Map<string, unknown[]>;
         agentStreamHead: Map<string, unknown[]>;
         agentStreamTail: Map<string, unknown[]>;
@@ -114,6 +127,17 @@ const {
     sessions: {
       server: {
         agents: new Map([["agent", { status: "idle", lastUsage: null }]]),
+        serverInfo: {
+          serverId: "server",
+          hostname: "test",
+          version: "0.0.0",
+          capabilities: {
+            voice: {
+              dictation: { enabled: true, reason: "" },
+              voice: { enabled: true, reason: "" },
+            },
+          },
+        },
         queuedMessages: new Map(),
         agentStreamHead: new Map(),
         agentStreamTail: new Map(),
@@ -135,6 +159,8 @@ const {
   );
   mockSessionState.setAgentStreamTail = setAgentStreamTailMock;
   mockSessionState.setAgentStreamHead = setAgentStreamHeadMock;
+  const markScrollInvestigationRenderMock = vi.fn();
+  const agentDirectoryStatusMock = vi.fn(() => "ready");
 
   return {
     theme,
@@ -147,10 +173,12 @@ const {
     deleteAttachmentsMock: vi.fn(async () => {}),
     encodeImagesMock: vi.fn(async (images: AttachmentMetadata[]) => images),
     openExternalUrlMock: vi.fn(async () => {}),
+    markScrollInvestigationRenderMock,
     mockSessionState,
     setAgentStreamTailMock,
     setAgentStreamHeadMock,
     setQueuedMessagesMock,
+    agentDirectoryStatusMock,
   };
 });
 
@@ -217,7 +245,7 @@ vi.mock("react-native-safe-area-context", () => ({
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: () => mockClient,
   useHostRuntimeIsConnected: () => true,
-  useHostRuntimeAgentDirectoryStatus: () => "ready",
+  useHostRuntimeAgentDirectoryStatus: () => agentDirectoryStatusMock(),
 }));
 
 vi.mock("@/stores/session-store", () => {
@@ -313,7 +341,7 @@ vi.mock("@/contexts/toast-context", () => ({
 }));
 
 vi.mock("@/utils/scroll-jank-investigation", () => ({
-  markScrollInvestigationRender: vi.fn(),
+  markScrollInvestigationRender: markScrollInvestigationRenderMock,
   markScrollInvestigationEvent: vi.fn(),
 }));
 
@@ -360,6 +388,20 @@ vi.mock("@/hooks/use-dictation", () => ({
 }));
 
 vi.mock("@/utils/server-info-capabilities", () => ({
+  getVoiceReadinessState: ({
+    serverInfo,
+    mode,
+  }: {
+    serverInfo: {
+      capabilities?: {
+        voice?: {
+          dictation?: { enabled: boolean; reason: string };
+          voice?: { enabled: boolean; reason: string };
+        };
+      };
+    } | null;
+    mode: "dictation" | "voice";
+  }) => serverInfo?.capabilities?.voice?.[mode] ?? null,
   resolveVoiceUnavailableMessage: () => null,
 }));
 
@@ -547,9 +589,23 @@ beforeEach(() => {
   deleteAttachmentsMock.mockClear();
   encodeImagesMock.mockClear();
   openExternalUrlMock.mockClear();
+  markScrollInvestigationRenderMock.mockClear();
   setAgentStreamTailMock.mockClear();
   setAgentStreamHeadMock.mockClear();
   setQueuedMessagesMock.mockClear();
+  agentDirectoryStatusMock.mockReset();
+  agentDirectoryStatusMock.mockReturnValue("ready");
+  mockSessionState.sessions.server.serverInfo = {
+    serverId: "server",
+    hostname: "test",
+    version: "0.0.0",
+    capabilities: {
+      voice: {
+        dictation: { enabled: true, reason: "" },
+        voice: { enabled: true, reason: "" },
+      },
+    },
+  };
   mockSessionState.sessions.server.agentStreamHead = new Map();
   mockSessionState.sessions.server.agentStreamTail = new Map();
   mockSessionState.sessions.server.queuedMessages = new Map();
@@ -661,6 +717,12 @@ function queryByTestId(testID: string): HTMLElement | null {
 
 function queryAllAttachmentMenuItems(): NodeListOf<HTMLElement> {
   return document.querySelectorAll('[data-testid^="message-input-attachment-menu-item-"]');
+}
+
+function countMessageInputRenders(): number {
+  return markScrollInvestigationRenderMock.mock.calls.filter(
+    ([componentId]) => componentId === "MessageInput:server:agent",
+  ).length;
 }
 
 describe("Composer attachments", () => {
@@ -845,6 +907,38 @@ describe("Composer attachments", () => {
     expect(queryByTestId("attachment-lightbox-image")).not.toBeNull();
     expect(openExternalUrlMock).not.toHaveBeenCalled();
     expect(latestAttachments).toEqual([{ kind: "image", metadata: image }]);
+  });
+
+  it("does not re-render MessageInput when opening the attachment lightbox", () => {
+    const image = imageAttachment("img-lightbox-render");
+    renderComposer({ initialAttachments: [{ kind: "image", metadata: image }] });
+    const renderCountBeforeLightbox = countMessageInputRenders();
+
+    click(queryByTestId("composer-image-attachment-pill")!);
+
+    expect(queryByTestId("attachment-lightbox-image")).not.toBeNull();
+    expect(countMessageInputRenders()).toBe(renderCountBeforeLightbox);
+  });
+
+  it("still re-renders MessageInput when submit loading semantics change", () => {
+    renderComposer({ initialText: "pending submit", isSubmitLoading: false });
+    const renderCountBeforeLoading = countMessageInputRenders();
+
+    renderComposer({ initialText: "pending submit", isSubmitLoading: true });
+
+    expect(countMessageInputRenders()).toBe(renderCountBeforeLoading + 1);
+    expect(document.querySelector('[aria-label="Send message"]')).toHaveProperty("disabled", true);
+  });
+
+  it("enables dictation from server capabilities before the agent directory finishes loading", () => {
+    agentDirectoryStatusMock.mockReturnValue("initial_loading");
+
+    renderComposer();
+
+    expect(document.querySelector('[aria-label="Start dictation"]')).toHaveProperty(
+      "disabled",
+      false,
+    );
   });
 
   it("locks the preserved draft while submit loading", () => {

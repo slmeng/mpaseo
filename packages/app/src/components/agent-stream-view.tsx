@@ -125,7 +125,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const [expandedInlineToolCallIds, setExpandedInlineToolCallIds] = useState<Set<string>>(
       new Set(),
     );
-    const openFileExplorer = usePanelStore((state) => state.openFileExplorer);
+    const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
     const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
 
     // Get serverId (fallback to agent's serverId if not provided)
@@ -199,17 +199,21 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           setCurrentPath: false,
         });
 
-        setExplorerTabForCheckout({
+        const checkout = {
           serverId: resolvedServerId,
           cwd: agent.cwd,
           isGit: agent.projectPlacement?.checkout?.isGit ?? true,
-          tab: "files",
+        };
+        setExplorerTabForCheckout({ ...checkout, tab: "files" });
+        openFileExplorerForCheckout({
+          isCompact: isMobile,
+          checkout,
         });
-        openFileExplorer();
       },
       [
         agent.cwd,
-        openFileExplorer,
+        isMobile,
+        openFileExplorerForCheckout,
         requestDirectoryListing,
         resolvedServerId,
         router,
